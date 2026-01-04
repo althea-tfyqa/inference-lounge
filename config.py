@@ -5,6 +5,17 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import model validator (validates against OpenRouter API, caches for 24h)
+try:
+    from tools.model_updater import validate_models
+    HAS_MODEL_VALIDATOR = True
+except ImportError:
+    HAS_MODEL_VALIDATOR = False
+    print("[Config] tools.model_updater not available, skipping validation")
+
+# Developer tools flag (used for freeze detector and other debug tools)
+DEVELOPER_TOOLS = False
+
 # Runtime configuration
 TURN_DELAY = 2  # Delay between turns (in seconds)
 SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT = True  # Set to True to include Chain of Thought in conversation history
@@ -12,55 +23,158 @@ SHARE_CHAIN_OF_THOUGHT = False  # Set to True to allow AIs to see each other's C
 SORA_SECONDS=6
 SORA_SIZE="1280x720"
 
-# Available AI models
-AI_MODELS = {
-    "Claude Opus 4.5": "claude-opus-4.5",
-    "Claude 3 Opus": "claude-3-opus",
-    "Claude Sonnet 4.5": "claude-sonnet-4.5",
-    "Claude Haiku 4.5": "claude-haiku-4.5",
-    "Claude Sonnet 4": "claude-sonnet-4",
-    "Gemini 3 Pro": "google/gemini-3-pro-preview",
-    "Claude 4 Opus": "claude-opus-4",
-    "Deepseek 3.2": "deepseek/deepseek-v3.2-specialized",
-    "GPT 5.1": "openai/gpt-5.1",
-    "GPT 4o": "openai/gpt-4o",
-    "Kimi K2": "moonshotai/kimi-k2",
-    "Kimi K2 Thinking": "moonshotai/kimi-k2-thinking",
-    "GPT 5 Pro": "openai/gpt-5-pro",
-    "Gemini 2.5 Pro": "google/gemini-2.5-pro",
-    "Claude Opus 4.1": "claude-opus-4.1",
-    "Grok 4": "x-ai/grok-4",
-    "Qwen 3 Max": "qwen/qwen3-max",
-    "DeepSeek R1": "deepseek-ai/deepseek-r1",
-    "qwen/qwen3-next-80b-a3b-thinking": "qwen/qwen3-next-80b-a3b-thinking",
-    "Hermes 4": "nousresearch/hermes-4-405b",
-    "Claude 3.7 Sonnet": "claude-3.7-sonnet",
-    "Gemini 2.5 Flash Lite": "google/gemini-2.5-flash-lite-preview-06-17",
-    "GPT 5": "openai/gpt-5",
-    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
-    "openai/gpt-4.1": "openai/gpt-4.1",
-    "Grok 3": "x-ai/grok-3-beta",
-    "deepseek/deepseek-chat-v3-0324:free": "deepseek/deepseek-chat-v3-0324:free",
-    "google/gemma-3-27b-it:free": "google/gemma-3-27b-it:free",
-    "gpt-4.5-preview-2025-02-27": "gpt-4.5-preview-2025-02-27",
-    "qwen/qwen3-235b-a22b": "qwen/qwen3-235b-a22b",
-    "Claude 3.5 Sonnet 20241022": "claude-3-5-sonnet-20241022",
-    "Gemini 2.5 Flash": "google/gemini-2.5-flash-preview",
-    "o3": "openai/o3",
-    "openai/chatgpt-4o-latest": "openai/chatgpt-4o-latest",
-    "Gemini 2.5 Pro": "google/gemini-2.5-pro-preview-03-25",
-    "GPT 4.1": "openai/gpt-4.1",
-    "Claude 3.5 Haiku 20241022": "claude-3.5-haiku",
-    "Claude 3 Sonnet 20240229": "claude-3-sonnet-20240229",
-    "Llama 3.1 405B Instruct": "meta-llama/llama-3.1-405b-instruct",
-    "Flux 1.1 Pro": "black-forest-labs/flux-1.1-pro",
-    "google/gemini-2.0-flash-thinking-exp:free": "google/gemini-2.0-flash-thinking-exp:free",
-    "openai/o1-mini": "openai/o1-mini",
-    "openai/o1": "openai/o1",
-    "Sora 2": "sora-2",
-    "Sora 2 Pro": "sora-2-pro",
-    "Nano Banana Pro": "google/gemini-3-pro-image-preview",
+# Output directory for conversation HTML files
+OUTPUTS_DIR = "outputs"
+
+# Available AI models - Hierarchical structure for GroupedModelComboBox
+# Structure: Tier → Provider → {Display Name: model_id}
+# This is the curated list - will be validated against OpenRouter API if available
+_CURATED_MODELS = {
+    "Paid": {
+        "Anthropic Claude": {
+            "Claude Opus 4.5": "anthropic/claude-opus-4.5",
+            "Claude Opus 4": "anthropic/claude-opus-4",
+            "Claude Opus 4.1": "anthropic/claude-opus-4.1",
+            "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
+            "Claude Sonnet 4": "anthropic/claude-sonnet-4",
+            "Claude 3.7 Sonnet": "anthropic/claude-3.7-sonnet",
+            "Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet",
+            "Claude Haiku 4.5": "anthropic/claude-haiku-4.5",
+            "Claude 3.5 Haiku": "anthropic/claude-3.5-haiku",
+            "Claude 3 Opus": "anthropic/claude-3-opus",
+        },
+        "Black Forest Labs": {
+            "Flux 1.1 Pro": "black-forest-labs/flux-1.1-pro",
+        },
+        "DeepSeek": {
+            "DeepSeek R1": "deepseek-ai/deepseek-r1",
+            "DeepSeek 3.2 Specialized": "deepseek/deepseek-v3.2-specialized",
+        },
+        "Google": {
+            "Gemini 3 Pro": "google/gemini-3-pro-preview",
+            "Gemini 2.5 Pro (Latest)": "google/gemini-2.5-pro-preview-03-25",
+            "Gemini 2.5 Pro": "google/gemini-2.5-pro",
+            "Gemini 2.5 Flash": "google/gemini-2.5-flash-preview",
+            "Gemini 2.5 Flash Lite": "google/gemini-2.5-flash-lite-preview-06-17",
+            "Nano Banana Pro": "google/gemini-3-pro-image-preview",
+        },
+        "Meta": {
+            "Llama 3.1 405B Instruct": "meta-llama/llama-3.1-405b-instruct",
+        },
+        "Moonshot AI": {
+            "Kimi K2 Thinking": "moonshotai/kimi-k2-thinking",
+            "Kimi K2": "moonshotai/kimi-k2",
+        },
+        "Nous Research": {
+            "Hermes 4 405B": "nousresearch/hermes-4-405b",
+        },
+        "OpenAI": {
+            "GPT 5.1": "openai/gpt-5.1",
+            "GPT 5 Pro": "openai/gpt-5-pro",
+            "GPT 5": "openai/gpt-5",
+            "GPT 4.5 Preview": "gpt-4.5-preview-2025-02-27",
+            "GPT 4.1 (Latest)": "openai/gpt-4.1",
+            "GPT 4.1": "openai/gpt-4.1",
+            "GPT 4o": "openai/gpt-4o",
+            "ChatGPT 4o Latest": "openai/chatgpt-4o-latest",
+            "GPT OSS 120B": "openai/gpt-oss-120b",
+            "o3": "openai/o3",
+            "o1": "openai/o1",
+            "o1-mini": "openai/o1-mini",
+            "Sora 2 Pro": "sora-2-pro",
+            "Sora 2": "sora-2",
+        },
+        "Qwen": {
+            "Qwen 3 Max": "qwen/qwen3-max",
+            "Qwen 3 Next 80B Thinking": "qwen/qwen3-next-80b-a3b-thinking",
+            "Qwen 3 235B": "qwen/qwen3-235b-a22b",
+        },
+        "xAI": {
+            "Grok 4": "x-ai/grok-4",
+            "Grok 3 Beta": "x-ai/grok-3-beta",
+        },
+    },
+    "Free": {
+        "Alibaba": {
+            "Tongyi DeepResearch 30B": "alibaba/tongyi-deepresearch-30b-a3b:free",
+        },
+        "Allen AI": {
+            "OLMo 3 32B Think": "allenai/olmo-3-32b-think:free",
+        },
+        "Amazon": {
+            "Nova 2 Lite V1": "amazon/nova-2-lite-v1:free",
+        },
+        "Arcee AI": {
+            "Trinity Mini": "arcee-ai/trinity-mini:free",
+        },
+        "Cognitive Computations": {
+            "Dolphin Mistral 24B": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+        },
+        "Google": {
+            "Gemini 2.0 Flash Exp": "google/gemini-2.0-flash-exp:free",
+            "Gemma 3 27B Instruct": "google/gemma-3-27b-it:free",
+            "Gemma 3 12B Instruct": "google/gemma-3-12b-it:free",
+            "Gemma 3 4B Instruct": "google/gemma-3-4b-it:free",
+            "Gemma 3N E2B Instruct": "google/gemma-3n-e2b-it:free",
+            "Gemma 3N E4B Instruct": "google/gemma-3n-e4b-it:free",
+        },
+        "KwaiPilot": {
+            "KAT Coder Pro": "kwaipilot/kat-coder-pro:free",
+        },
+        "Meituan": {
+            "LongCat Flash Chat": "meituan/longcat-flash-chat:free",
+        },
+        "Meta": {
+            "Llama 3.3 70B Instruct": "meta-llama/llama-3.3-70b-instruct:free",
+            "Llama 3.2 3B Instruct": "meta-llama/llama-3.2-3b-instruct:free",
+        },
+        "Mistral AI": {
+            "Mistral Small 3.1 24B": "mistralai/mistral-small-3.1-24b-instruct:free",
+            "Mistral 7B Instruct": "mistralai/mistral-7b-instruct:free",
+            "Devstral 2512": "mistralai/devstral-2512:free",
+        },
+        "Moonshot AI": {
+            "Kimi K2": "moonshotai/kimi-k2:free",
+        },
+        "Nous Research": {
+            "Hermes 3 Llama 3.1 405B": "nousresearch/hermes-3-llama-3.1-405b:free",
+        },
+        "NVIDIA": {
+            "Nemotron Nano 12B V2 VL": "nvidia/nemotron-nano-12b-v2-vl:free",
+            "Nemotron Nano 9B V2": "nvidia/nemotron-nano-9b-v2:free",
+        },
+        "OpenAI": {
+            "GPT OSS 120B": "openai/gpt-oss-120b:free",
+            "GPT OSS 20B": "openai/gpt-oss-20b:free",
+        },
+        "Qwen": {
+            "Qwen 3 235B": "qwen/qwen3-235b-a22b:free",
+            "Qwen 3 4B": "qwen/qwen3-4b:free",
+            "Qwen 3 Coder": "qwen/qwen3-coder:free",
+        },
+        "TNG Technology": {
+            "DeepSeek R1T2 Chimera": "tngtech/deepseek-r1t2-chimera:free",
+            "DeepSeek R1T Chimera": "tngtech/deepseek-r1t-chimera:free",
+            "TNG R1T Chimera": "tngtech/tng-r1t-chimera:free",
+        },
+        "xAI": {
+            "GLM 4.5 Air": "z-ai/glm-4.5-air:free",
+        },
+    },
 }
+
+# Validate curated models against OpenRouter API (cached for 24 hours)
+# This removes any models that return 404, keeping the list up-to-date
+if HAS_MODEL_VALIDATOR:
+    AI_MODELS = validate_models(_CURATED_MODELS)
+else:
+    AI_MODELS = _CURATED_MODELS
+
+# Flat lookup dict for compatibility with functions that expect simple name→id mapping
+_FLAT_AI_MODELS = {}
+for tier_models in AI_MODELS.values():
+    for provider_models in tier_models.values():
+        _FLAT_AI_MODELS.update(provider_models)
 
 # System prompt pairs library
 SYSTEM_PROMPT_PAIRS = {
@@ -1021,3 +1135,68 @@ creative code:
         "AI-5": ""
     },
 }
+
+def get_model_tier_by_id(model_id):
+    """Get the tier (Paid/Free) for a model by its model_id.
+
+    Note: Upstream config has flat AI_MODELS dict. This is a compatibility
+    function for our hierarchical model structure in grouped_model_selector.py.
+    """
+    # Check for :free suffix
+    if model_id and ":free" in model_id.lower():
+        return "Free"
+    # Default to Paid for all other models
+    return "Paid"
+
+def get_model_id(display_name):
+    """Get the model_id for a given display name.
+
+    Args:
+        display_name: The human-readable model name (e.g., "Claude Opus 4.5")
+
+    Returns:
+        The model_id (e.g., "claude-opus-4.5") or None if not found
+    """
+    return _FLAT_AI_MODELS.get(display_name)
+
+def get_display_name(model_id):
+    """Get the display name for a given model_id.
+
+    Args:
+        model_id: The API model ID (e.g., "anthropic/claude-opus-4.5")
+
+    Returns:
+        The display name (e.g., "Claude Opus 4.5") or the model_id if not found
+    """
+    for display_name, mid in _FLAT_AI_MODELS.items():
+        if mid == model_id:
+            return display_name
+    return model_id  # Fallback to model_id if not found
+
+def get_invite_models_text(tier="Both"):
+    """Get formatted text listing available models for AI invitations.
+
+    Args:
+        tier: "Free", "Paid", or "Both" - controls which models are listed
+
+    Returns:
+        Formatted string with model list for inclusion in system prompts
+    """
+    if tier == "Free":
+        # Filter for free models (those with :free in model_id)
+        models = {name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" in mid.lower()}
+    elif tier == "Paid":
+        # Filter for paid models (those without :free in model_id)
+        models = {name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" not in mid.lower()}
+    else:  # "Both"
+        models = _FLAT_AI_MODELS
+
+    if not models:
+        return "No models available for this tier."
+
+    # Format as a bulleted list
+    model_list = "\n".join(f"  - {name}" for name in sorted(models.keys()))
+
+    tier_label = f"{tier} models" if tier != "Both" else "Available models"
+    return f"{tier_label}:\n{model_list}"
+

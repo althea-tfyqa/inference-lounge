@@ -3,6 +3,7 @@ name = "debate"
 version = "0.1.0"
 description = "AI-to-AI debate system"
 authors = ["Your Name <you@example.com>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10.0,<3.12"
@@ -10,12 +11,16 @@ requests = "^2.32.3"
 replicate = "^1.0.2"
 python-dotenv = "^1.0.0"
 Pillow = "^11.1.0"
-ddgs = "^9.0.0"
 pyqt6 = "^6.10.0"
 openai = "^2.8.1"
 anthropic = "^0.75.0"
-together = "^1.5.31"
-networkx = "<3.6"
+together = "^1.5.30"
+beautifulsoup4 = "^4.14.2"
+networkx = "^3.1"
+duckduckgo-search = "^6.3.5"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.0.0"
 
 [tool.pyright]
 # https://github.com/microsoft/pyright/blob/main/docs/configuration.md
@@ -30,4 +35,3 @@ ignore = ['W291', 'W292', 'W293']
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
-

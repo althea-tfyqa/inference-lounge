@@ -172,9 +172,26 @@ memory/ai-2/*
 logs/*
 !logs/.gitkeep
 videos/*
-shitpostbench_evaluation.md
-shitpostbench.py
-reduce_html_size.py
+models_cache.json
+.claude/
+settings/splitter_state.json
 
-# Benchmark reports (local only)
-shitpostbench_reports/
+# BackroomsBench evaluation reports (generated outputs, except leaderboard)
+backroomsbench_reports/*
+!backroomsbench_reports/.gitkeep
+!backroomsbench_reports/LEADERBOARD.md
+!backroomsbench_reports/leaderboard.json
+
+# Output conversation files (timestamped)
+outputs/conversation_*.html
+outputs/conversation_full.html
+
+# Keep the outputs folder structure
+!outputs/.gitkeep
+
+# Root-level generated HTML files (but allow docs/*.html for GitHub Pages)
+/*.html
+
+# Temporary diff files
+diff_*.txt
+DIFF_*.md

@@ -15,16 +15,17 @@ import base64
 from together import Together
 from openai import OpenAI
 import re
+from config import OUTPUTS_DIR
 try:
     from bs4 import BeautifulSoup
 except ImportError:
     print("BeautifulSoup not found. Please install it with 'pip install beautifulsoup4'")
 
 try:
-    from ddgs import DDGS
+    from duckduckgo_search import DDGS
 except ImportError:
     DDGS = None
-    print("ddgs not found. Install with: pip install ddgs")
+    print("DuckDuckGo Search not found. Install with: pip install duckduckgo-search")
 
 # Load environment variables
 load_dotenv()
@@ -895,8 +896,10 @@ def read_shared_html(*args, **kwargs):
 def update_shared_html(*args, **kwargs):
     return False
 
-def open_html_in_browser(file_path="conversation_full.html"):
-    import webbrowser, os
+def open_html_in_browser(file_path=None):
+    import webbrowser
+    if file_path is None:
+        file_path = os.path.join(OUTPUTS_DIR, "conversation_full.html")
     full_path = os.path.abspath(file_path)
     webbrowser.open('file://' + full_path)
 
@@ -984,7 +987,8 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                                 return {
                                     "success": True,
                                     "image_path": str(image_path),
-                                    "timestamp": timestamp
+                                    "timestamp": timestamp,
+                                    "model": model
                                 }
                             except Exception as e:
                                 print(f"Failed to decode base64 image: {e}")
@@ -1005,7 +1009,8 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                                     return {
                                         "success": True,
                                         "image_path": str(image_path),
-                                        "timestamp": timestamp
+                                        "timestamp": timestamp,
+                                        "model": model
                                     }
                             except Exception as e:
                                 print(f"Failed to download image: {e}")

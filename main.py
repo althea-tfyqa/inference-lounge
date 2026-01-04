@@ -1,4 +1,10 @@
-  # main.py
+# main.py
+
+# Suppress Pydantic warnings about "model_" field names conflicting with protected namespaces.
+# These warnings come from third-party API SDKs (OpenAI, etc.) and don't affect our code.
+# The warnings are harmless but clutter the console output on startup.
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 import os
 import time
@@ -19,7 +25,10 @@ from config import (
     AI_MODELS,
     SYSTEM_PROMPT_PAIRS,
     SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
-    SHARE_CHAIN_OF_THOUGHT
+    SHARE_CHAIN_OF_THOUGHT,
+    DEVELOPER_TOOLS,
+    get_model_tier_by_id,
+    get_display_name
 )
 from shared_utils import (
     call_claude_api,
@@ -33,6 +42,25 @@ from shared_utils import (
 )
 from gui import LiminalBackroomsApp, load_fonts
 from command_parser import parse_commands, AgentCommand, format_command_result
+
+# Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
+if DEVELOPER_TOOLS:
+    try:
+        from tools.freeze_detector import FreezeDetector, enable_faulthandler
+        _FREEZE_DETECTOR_AVAILABLE = True
+    except ImportError as e:
+        print(f"Warning: Could not load freeze detector: {e}")
+        _FREEZE_DETECTOR_AVAILABLE = False
+else:
+    _FREEZE_DETECTOR_AVAILABLE = False
+
+# =============================================================================
+# LOGS DIRECTORY SETUP
+# =============================================================================
+# All log files (crash_log.txt, freeze_log.txt) go here
+# This folder should be gitignored
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 def is_image_message(message: dict) -> bool:
     """Returns True if 'message' contains a base64 image in its 'content' list."""
@@ -53,20 +81,23 @@ class WorkerSignals(QObject):
     result = pyqtSignal(str, object)  # Signal for complete result object
     progress = pyqtSignal(str)
     streaming_chunk = pyqtSignal(str, str)  # Signal for streaming tokens: (ai_name, chunk)
+    started = pyqtSignal(str, str)  # Signal when AI starts processing: (ai_name, model)
 
 
 class ImageUpdateSignals(QObject):
     """Signals for updating UI with generated images from background threads"""
     image_ready = pyqtSignal(dict, str)  # (image_message, image_path)
+    image_failed = pyqtSignal(str, str, str)  # (ai_name, prompt, error_message)
 
 class VideoUpdateSignals(QObject):
     """Signals for updating UI with generated videos from background threads"""
-    video_ready = pyqtSignal(str, str)  # (video_path, prompt)
+    video_ready = pyqtSignal(str, str, str, str)  # (video_path, prompt, ai_name, model)
+    video_failed = pyqtSignal(str, str, str)  # (ai_name, prompt, error_message)
 
 class Worker(QRunnable):
     """Worker thread for processing AI turns using QThreadPool"""
     
-    def __init__(self, ai_name, conversation, model, system_prompt, is_branch=False, branch_id=None, gui=None):
+    def __init__(self, ai_name, conversation, model, system_prompt, is_branch=False, branch_id=None, gui=None, invite_tier="Both", prompt_modifications=None, ai_temperatures=None):
         super().__init__()
         self.ai_name = ai_name
         self.conversation = conversation.copy()  # Make a copy to prevent race conditions
@@ -75,7 +106,10 @@ class Worker(QRunnable):
         self.is_branch = is_branch
         self.branch_id = branch_id
         self.gui = gui
-        
+        self.invite_tier = invite_tier
+        self.prompt_modifications = prompt_modifications or {}
+        self.ai_temperatures = ai_temperatures or {}
+
         # Create signals object
         self.signals = WorkerSignals()
     
@@ -83,6 +117,10 @@ class Worker(QRunnable):
     def run(self):
         """Process the AI turn when the thread is started"""
         print(f"[Worker] >>> Starting run() for {self.ai_name} ({self.model})")
+        
+        # Emit started signal so UI can show typing indicator
+        self.signals.started.emit(self.ai_name, self.model)
+        
         try:
             # Emit progress update
             self.signals.progress.emit(f"Processing {self.ai_name} turn with {self.model}...")
@@ -99,7 +137,10 @@ class Worker(QRunnable):
                 self.model,
                 self.system_prompt,
                 gui=self.gui,
-                streaming_callback=stream_chunk
+                streaming_callback=stream_chunk,
+                invite_tier=self.invite_tier,
+                prompt_modifications=self.prompt_modifications,
+                ai_temperatures=self.ai_temperatures
             )
             print(f"[Worker] ai_turn completed for {self.ai_name}, result type: {type(result)}")
             
@@ -130,11 +171,14 @@ class Worker(QRunnable):
             # Still emit finished signal even if there's an error
             self.signals.finished.emit()
 
-def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None, streaming_callback=None):
+def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None, streaming_callback=None, invite_tier="Both", prompt_modifications=None, ai_temperatures=None):
     """Execute an AI turn with the given parameters
-    
+
     Args:
         streaming_callback: Optional function(chunk: str) to call with each streaming token
+        invite_tier: "Free", "Paid", or "Both" - controls which models AI can invite
+        prompt_modifications: Optional dict mapping AI names to custom system prompts
+        ai_temperatures: Optional dict mapping AI names to temperature values
     """
     print(f"==================================================")
     print(f"Starting {model} turn ({ai_name})...")
@@ -143,25 +187,51 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     # HTML contributions and living document disabled
     enhanced_system_prompt = system_prompt
     
-    # Get the actual model ID from the display name
-    model_id = AI_MODELS.get(model, model)
+    # The model parameter is now the actual model ID (from get_selected_model_id)
+    model_id = model
+    
+    # Inject available models based on invite tier setting
+    from config import get_invite_models_text
+    models_text = get_invite_models_text(invite_tier)
+    
+    # Debug: log the tier setting and models text
+    print(f"[AI Turn] Tier setting: {invite_tier}")
+    print(f"[AI Turn] Models text: {models_text}")
+    
+    # Replace placeholder in prompt if exists, otherwise append
+    if "!add_ai" in enhanced_system_prompt:
+        # Find and update model list placeholder or existing model list
+        import re
+        # Match the placeholder text: [Models list injected based on tier setting]
+        placeholder_pattern = r'\[Models list injected based on tier setting\]'
+        # Match our emphatic format: ⚠️ ONLY USE FREE/PAID MODELS: ... — DO NOT ...
+        emphatic_pattern = r'⚠️ ONLY USE (?:FREE|PAID) MODELS:[^\n]*'
+        # Also match old format or "Available models" line
+        legacy_pattern = r'(?:FREE MODELS[^:]*:|PAID MODELS[^:]*:|Available[^:]*:)[^\n]*'
+        
+        if re.search(placeholder_pattern, enhanced_system_prompt):
+            # Replace the placeholder with actual model list
+            enhanced_system_prompt = re.sub(placeholder_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced placeholder with models list")
+        elif re.search(emphatic_pattern, enhanced_system_prompt):
+            # Replace existing emphatic model list line (from previous turn)
+            enhanced_system_prompt = re.sub(emphatic_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced emphatic models line")
+        elif re.search(legacy_pattern, enhanced_system_prompt):
+            # Replace legacy model list line
+            enhanced_system_prompt = re.sub(legacy_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced legacy models line")
+        else:
+            # Add after !add_ai line if no placeholder found
+            enhanced_system_prompt = enhanced_system_prompt.replace(
+                '!add_ai "Model Name"',
+                f'!add_ai "Model Name"\n  {models_text}\n '
+            )
+            print(f"[AI Turn] Appended models list after !add_ai")
     
     # Prepend model identity to system prompt so AI knows who it is
-    enhanced_system_prompt = f"You are {ai_name} ({model}).\n\n{enhanced_system_prompt}"
-    
-    # Apply any self-added prompt additions for this AI
-    # Also get custom temperature setting
-    ai_temperature = 1.0  # Default
-    if gui and hasattr(gui, 'conversation_manager') and gui.conversation_manager:
-        prompt_additions = gui.conversation_manager.get_prompt_additions_for_ai(ai_name)
-        if prompt_additions:
-            enhanced_system_prompt += prompt_additions
-            print(f"[Prompt] Applied prompt additions for {ai_name}")
-        
-        # Get custom temperature if set
-        ai_temperature = gui.conversation_manager.get_temperature_for_ai(ai_name)
-        if ai_temperature != 1.0:
-            print(f"[Temperature] Using custom temperature {ai_temperature} for {ai_name}")
+    display_name = get_display_name(model_id)
+    enhanced_system_prompt = f"You are {ai_name} ({display_name}).\n\n{enhanced_system_prompt}"
     
     # Check for branch type and count AI responses
     is_rabbithole = False
@@ -219,7 +289,31 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     
     # Apply the enhanced system prompt (with HTML contribution instructions)
     system_prompt = enhanced_system_prompt
-    
+
+    # Check if this AI has added to their prompt via !prompt command
+    if prompt_modifications and ai_name in prompt_modifications:
+        # Note: This is for compatibility - the variable name is prompt_modifications
+        # but it's actually used as prompt_additions (list-based)
+        if isinstance(prompt_modifications, dict) and ai_name in prompt_modifications:
+            if isinstance(prompt_modifications[ai_name], list):
+                # List-based additions (upstream approach)
+                additions = prompt_modifications[ai_name]
+                if additions:
+                    formatted_additions = "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(additions)
+                    system_prompt += formatted_additions
+                    print(f"[AI Turn] Applied {len(additions)} prompt additions for {ai_name}")
+            else:
+                # Single string (fallback for old approach)
+                custom_prompt = prompt_modifications[ai_name]
+                print(f"[AI Turn] Using custom prompt for {ai_name}: {custom_prompt[:100]}...")
+                system_prompt = custom_prompt
+
+    # Get temperature for this AI (default 1.0)
+    temperature = 1.0
+    if ai_temperatures and ai_name in ai_temperatures:
+        temperature = ai_temperatures[ai_name]
+        print(f"[AI Turn] Using custom temperature for {ai_name}: {temperature}")
+
     # CRITICAL: Always ensure we have the system prompt
     # No matter what happens with the conversation, we need this
     messages = []
@@ -537,7 +631,7 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 prompt_content = "Connecting..."  # Default fallback
             
             # Call Claude API with filtered messages (with streaming if callback provided)
-            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=ai_temperature)
+            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
             
             return {
                 "role": "assistant",
@@ -602,7 +696,7 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                     context_messages = []
                 
                 # Call OpenRouter API with streaming support
-                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=ai_temperature)
+                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=temperature)
                 
                 # Avoid printing full response which could be large
                 response_preview = str(response)[:200] + "..." if response and len(str(response)) > 200 else response
@@ -652,61 +746,269 @@ class ConversationManager:
     def __init__(self, app):
         self.app = app
         self.workers = []  # Keep track of worker threads
-        
+
+        # Initialize AI command state dictionaries
+        self.ai_prompt_additions = {}  # Store prompt additions from !prompt command (list per AI)
+        self.ai_temperatures = {}  # Store custom temperatures from !temperature command
+
         # Initialize the worker thread pool
         self.thread_pool = QThreadPool()
         print(f"Conversation Manager initialized with {self.thread_pool.maxThreadCount()} threads")
-        
+
         # Set up image update signals for thread-safe UI updates
         self.image_signals = ImageUpdateSignals()
         self.image_signals.image_ready.connect(self._on_image_ready)
-        
+        self.image_signals.image_failed.connect(self._on_image_failed)
+
         # Set up video update signals for thread-safe UI updates
         self.video_signals = VideoUpdateSignals()
         self.video_signals.video_ready.connect(self._on_video_ready)
+        self.video_signals.video_failed.connect(self._on_video_failed)
         
-        # Store per-AI prompt additions (self-modifications)
-        self.ai_prompt_additions = {}
-        
-        # Store per-AI temperature settings (default is 1.0)
-        self.ai_temperatures = {}
-        
-    def _on_video_ready(self, video_path: str, prompt: str):
+    def _on_video_ready(self, video_path: str, prompt: str, ai_name: str, model: str):
         """Handle video ready signal - runs on main thread"""
         try:
+            # Remove the "generating..." notification first
+            self._remove_pending_notification(ai_name, prompt)
+            
+            # Format display name like message headings do
+            display_name = f"{ai_name} ({model})" if model else ai_name
+            
             print(f"[Agent] Video ready, updating UI: {video_path}")
             # Update the video preview panel
             if hasattr(self.app, 'right_sidebar') and hasattr(self.app.right_sidebar, 'update_video_preview'):
-                self.app.right_sidebar.update_video_preview(video_path)
+                self.app.right_sidebar.update_video_preview(video_path, display_name, prompt)
             
             # Update status bar notification with prompt (truncated for display)
             if hasattr(self.app, 'notification_label'):
                 # Truncate long prompts for status bar
                 display_prompt = prompt[:100] + "..." if len(prompt) > 100 else prompt
-                self.app.notification_label.setText(f"🎬 Video completed: {display_prompt}")
+                self.app.notification_label.setText(f"🎬 {display_name}: Video completed")
         except Exception as e:
             print(f"[Agent] Error handling video ready: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _on_video_failed(self, ai_name: str, prompt: str, error: str):
+        """Handle video generation failure - runs on main thread"""
+        try:
+            # Remove the "generating..." notification first
+            self._remove_pending_notification(ai_name, prompt)
+            
+            # Get AI's model name for consistent formatting
+            ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+            model_name = self.get_model_for_ai(ai_num)
+            
+            # Create a failure notification message that AIs can see
+            truncated_prompt = prompt[:50] + '...' if len(prompt) > 50 else prompt
+            
+            # Parse and simplify error message for display, but log the full error
+            print(f"[Agent] ========== VIDEO GENERATION FAILED ==========")
+            print(f"[Agent]   AI: {ai_name} ({model_name})")
+            print(f"[Agent]   Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+            print(f"[Agent]   Full error: {error}")
+            print(f"[Agent] ==============================================")
+            
+            # Determine user-friendly error message based on error content
+            error_lower = error.lower()
+            if "402" in error or "credits" in error_lower or "insufficient" in error_lower:
+                simple_error = "insufficient API credits"
+                detail = "Check your OpenAI balance (Sora requires credits)"
+            elif "429" in error or "rate" in error_lower or "limit" in error_lower:
+                simple_error = "rate limited"
+                detail = "Too many requests, please wait"
+                print(f"[Agent]   >>> RATE LIMITED - Full response: {error}")
+            elif "401" in error or "unauthorized" in error_lower or "api key" in error_lower:
+                simple_error = "authentication failed"
+                detail = "Check your OPENAI_API_KEY"
+            elif "not set" in error_lower:
+                simple_error = "API key not configured"
+                detail = "Set OPENAI_API_KEY in .env file"
+            elif "timeout" in error_lower:
+                simple_error = "request timed out"
+                detail = "Video generation took too long"
+            elif "500" in error or "502" in error or "503" in error or "server" in error_lower:
+                simple_error = "server error"
+                detail = "OpenAI Sora is having issues"
+            elif "content" in error_lower and "policy" in error_lower:
+                simple_error = "content policy violation"
+                detail = "Prompt was rejected by safety filters"
+            elif "failed" in error_lower and "status" in error_lower:
+                simple_error = "video rendering failed"
+                detail = "Sora couldn't complete the video"
+            else:
+                simple_error = "generation failed"
+                # Extract a short error snippet if available
+                detail = error[:80] if len(error) <= 80 else error[:77] + "..."
+            
+            print(f"[Agent]   Simplified: {simple_error} — {detail}")
+            
+            failure_message = {
+                "role": "system",
+                "content": f"❌ [{ai_name} ({model_name})]: !video \"{truncated_prompt}\" — {simple_error}",
+                "_type": "agent_notification",
+                "_command_success": False
+            }
+            
+            # Add to conversation so AIs can see it
+            self.app.main_conversation.append(failure_message)
+            self.app.left_pane.conversation = self.app.main_conversation
+            self.app.left_pane.render_conversation()
+            
+            # Update status bar with more detail
+            if hasattr(self.app, 'notification_label'):
+                self.app.notification_label.setText(f"❌ Video failed: {simple_error} — {detail}")
+                
+            print(f"[Agent] Video failure notification added to conversation")
+        except Exception as e:
+            print(f"[Agent] Error handling video failure: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_image_failed(self, ai_name: str, prompt: str, error: str):
+        """Handle image generation failure - runs on main thread"""
+        try:
+            # Remove the "generating..." notification first
+            self._remove_pending_notification(ai_name, prompt)
+            
+            # Get AI's model name for consistent formatting
+            ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+            model_name = self.get_model_for_ai(ai_num)
+            
+            # Create a failure notification message that AIs can see
+            truncated_prompt = prompt[:50] + '...' if len(prompt) > 50 else prompt
+            
+            # Parse and simplify error message for display, but log the full error
+            print(f"[Agent] ========== IMAGE GENERATION FAILED ==========")
+            print(f"[Agent]   AI: {ai_name} ({model_name})")
+            print(f"[Agent]   Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+            print(f"[Agent]   Full error: {error}")
+            print(f"[Agent] ==============================================")
+            
+            # Determine user-friendly error message based on error content
+            error_lower = error.lower()
+            if "402" in error or "credits" in error_lower or "insufficient" in error_lower:
+                simple_error = "insufficient API credits"
+                detail = "Check your OpenRouter balance"
+            elif "429" in error or "rate" in error_lower or "limit" in error_lower:
+                simple_error = "rate limited"
+                detail = "Too many requests, please wait"
+                print(f"[Agent]   >>> RATE LIMITED - Full response: {error}")
+            elif "401" in error or "unauthorized" in error_lower or "api key" in error_lower:
+                simple_error = "authentication failed"
+                detail = "Check your OPENROUTER_API_KEY"
+            elif "timeout" in error_lower:
+                simple_error = "request timed out"
+                detail = "Server took too long to respond"
+            elif "500" in error or "502" in error or "503" in error or "server" in error_lower:
+                simple_error = "server error"
+                detail = "OpenRouter or model provider is having issues"
+            elif "modalities" in error_lower or "not support" in error_lower:
+                simple_error = "model doesn't support image generation"
+                detail = "Try a different image model"
+            elif "content" in error_lower and "policy" in error_lower:
+                simple_error = "content policy violation"
+                detail = "Prompt was rejected by safety filters"
+            else:
+                simple_error = "generation failed"
+                # Extract a short error snippet if available
+                detail = error[:80] if len(error) <= 80 else error[:77] + "..."
+            
+            print(f"[Agent]   Simplified: {simple_error} — {detail}")
+            
+            failure_message = {
+                "role": "system",
+                "content": f"❌ [{ai_name} ({model_name})]: !image \"{truncated_prompt}\" — {simple_error}",
+                "_type": "agent_notification",
+                "_command_success": False
+            }
+            
+            # Add to conversation so AIs can see it
+            self.app.main_conversation.append(failure_message)
+            self.app.left_pane.conversation = self.app.main_conversation
+            self.app.left_pane.render_conversation()
+            
+            # Update status bar with more detail
+            if hasattr(self.app, 'notification_label'):
+                self.app.notification_label.setText(f"❌ Image failed: {simple_error} — {detail}")
+                
+            print(f"[Agent] Image failure notification added to conversation")
+        except Exception as e:
+            print(f"[Agent] Error handling image failure: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _remove_pending_notification(self, ai_name: str, prompt: str):
+        """Remove the 'generating...' notification for a completed image/video"""
+        prompt_key = f"{ai_name}:{prompt[:50]}"
         
+        if not hasattr(self, '_pending_notifications'):
+            return
+        
+        notification_id = self._pending_notifications.get(prompt_key)
+        if not notification_id:
+            print(f"[Agent] No pending notification found for {prompt_key[:40]}...")
+            return
+        
+        # Get the correct conversation (main or branch)
+        if self.app.active_branch:
+            branch_id = self.app.active_branch
+            if branch_id in self.app.branch_conversations:
+                conversation = self.app.branch_conversations[branch_id]['conversation']
+            else:
+                conversation = self.app.main_conversation
+        else:
+            conversation = self.app.main_conversation
+        
+        # Remove in-place by finding and removing the matching message
+        # This preserves the list reference!
+        removed = False
+        for i in range(len(conversation) - 1, -1, -1):  # Iterate backwards for safe removal
+            if conversation[i].get('_notification_id') == notification_id:
+                del conversation[i]
+                removed = True
+                break
+        
+        if removed:
+            print(f"[Agent] Removed 'generating...' notification (ID: {notification_id})")
+            # Ensure left_pane has the current reference
+            self.app.left_pane.conversation = conversation
+        
+        # Clean up tracking dict
+        del self._pending_notifications[prompt_key]
+    
     def _on_image_ready(self, image_message: dict, image_path: str):
         """Handle image ready signal - runs on main thread"""
         try:
-            # Add image to conversation
-            self.app.main_conversation.append(image_message)
+            # Remove the "generating..." notification first
+            ai_name = image_message.get('ai_name', 'AI')
+            model = image_message.get('model', '')
+            prompt = image_message.get('_prompt', '')
+            self._remove_pending_notification(ai_name, prompt)
+            
+            # Format display name like message headings do
+            display_name = f"{ai_name} ({model})" if model else ai_name
+            
+            # Add image to the correct conversation (main or branch)
+            if self.app.active_branch:
+                branch_id = self.app.active_branch
+                if branch_id in self.app.branch_conversations:
+                    self.app.branch_conversations[branch_id]['conversation'].append(image_message)
+                    self.app.left_pane.conversation = self.app.branch_conversations[branch_id]['conversation']
+            else:
+                self.app.main_conversation.append(image_message)
+                self.app.left_pane.conversation = self.app.main_conversation
             
             # Update the conversation display
-            self.app.left_pane.conversation = self.app.main_conversation
             self.app.left_pane.render_conversation()
             
             # Update the image preview panel
             if hasattr(self.app.right_sidebar, 'update_image_preview'):
-                self.app.right_sidebar.update_image_preview(image_path)
+                self.app.right_sidebar.update_image_preview(image_path, display_name, prompt)
             
             # Update status bar notification
-            ai_name = image_message.get('ai_name', 'AI')
             if hasattr(self.app, 'notification_label'):
-                self.app.notification_label.setText(f"🖼️ {ai_name} generated an image")
+                self.app.notification_label.setText(f"🖼️ {display_name} generated an image")
             
             print(f"[Agent] Image added to conversation context - other AIs can now see it")
         except Exception as e:
@@ -826,6 +1128,9 @@ class ConversationManager:
         else:
             print(f"MAIN: Continuing conversation - turn {self.app.turn_count+1} of {max_iterations}")
         
+        # Update iteration counter in status bar
+        self.app.update_iteration(self.app.turn_count + 1, max_iterations)
+        
         # Create worker threads dynamically based on number of AIs
         workers = []
         
@@ -843,6 +1148,7 @@ class ConversationManager:
                     "role": "user",
                     "content": f"[{ai_name} used !mute_self - listening this turn]",
                     "_type": "agent_notification",
+                    "_command_success": None,  # Info notification (not success/failure)
                     "hidden": False
                 }
                 self.app.main_conversation.append(mute_notification)
@@ -853,7 +1159,11 @@ class ConversationManager:
             model = self.get_model_for_ai(i)
             prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair][ai_name]
             
-            worker = Worker(ai_name, self.app.main_conversation, model, prompt, gui=self.app)
+            # Get invite tier setting
+            invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+
+            worker = Worker(ai_name, self.app.main_conversation, model, prompt, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+            worker.signals.started.connect(self.on_ai_started)
             worker.signals.response.connect(self.on_ai_response_received)
             worker.signals.result.connect(self.on_ai_result_received)
             worker.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -960,7 +1270,11 @@ class ConversationManager:
                 
                 print(f"[Agent] Creating worker for newly added {ai_name} ({model})")
                 
-                worker = Worker(ai_name, conversation.copy(), model, prompt, gui=self.app)
+                # Get invite tier setting
+                invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+
+                worker = Worker(ai_name, conversation.copy(), model, prompt, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+                worker.signals.started.connect(self.on_ai_started)
                 worker.signals.response.connect(self.on_ai_response_received)
                 worker.signals.result.connect(self.on_ai_result_received)
                 worker.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -1061,6 +1375,7 @@ class ConversationManager:
             else:
                 print(f"BRANCH: All {max_iterations} turns completed")
                 self.app.statusBar().showMessage(f"Completed {max_iterations} turns")
+                self.app.clear_iteration()  # Clear iteration counter
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
@@ -1079,6 +1394,7 @@ class ConversationManager:
             else:
                 print(f"MAIN: All {max_iterations} turns completed")
                 self.app.statusBar().showMessage(f"Completed {max_iterations} turns")
+                self.app.clear_iteration()  # Clear iteration counter
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
@@ -1217,12 +1533,16 @@ class ConversationManager:
         # Get max iterations
         max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         
+        # Get invite tier setting
+        invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        
         # Create worker threads for AI-1, AI-2, and AI-3
-        worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
-        worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
-        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+        worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
         
         # Connect signals for worker1
+        worker1.signals.started.connect(self.on_ai_started)
         worker1.signals.response.connect(self.on_ai_response_received)
         worker1.signals.result.connect(self.on_ai_result_received)
         worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -1230,6 +1550,7 @@ class ConversationManager:
         worker1.signals.error.connect(self.on_ai_error)
         
         # Connect signals for worker2
+        worker2.signals.started.connect(self.on_ai_started)
         worker2.signals.response.connect(self.on_ai_response_received)
         worker2.signals.result.connect(self.on_ai_result_received)
         worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -1237,6 +1558,7 @@ class ConversationManager:
         worker2.signals.error.connect(self.on_ai_error)
         
         # Connect signals for worker3
+        worker3.signals.started.connect(self.on_ai_started)
         worker3.signals.response.connect(self.on_ai_response_received)
         worker3.signals.result.connect(self.on_ai_result_received)
         worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -1252,13 +1574,47 @@ class ConversationManager:
         if not hasattr(self, '_streaming_buffers'):
             self._streaming_buffers = {}
         
-        # Initialize buffer for this AI if needed
-        if ai_name not in self._streaming_buffers:
+        # Initialize buffer for this AI if needed (first chunk)
+        is_first_chunk = ai_name not in self._streaming_buffers
+        
+        if is_first_chunk:
             self._streaming_buffers[ai_name] = ""
-            # Add a header to show this AI is responding
+            
+            # Remove typing indicator when first chunk arrives - AI is now "speaking" not "thinking"
+            self._remove_typing_indicator(ai_name)
+            
+            # CRITICAL: Create a placeholder message in the conversation BEFORE rendering
+            # This ensures a widget gets created that we can then append to
             ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_number)
-            self.app.left_pane.append_text(f"\n{ai_name} ({model_name}):\n\n", "header")
+            
+            # Track the placeholder message so we can update it
+            if not hasattr(self, '_streaming_messages'):
+                self._streaming_messages = {}
+            
+            placeholder_msg = {
+                "role": "assistant",
+                "content": "",  # Start empty, will be filled by streaming
+                "ai_name": ai_name,
+                "model": model_name,
+                "_streaming": True  # Mark as streaming so we know to update it
+            }
+            self._streaming_messages[ai_name] = placeholder_msg
+            
+            # Add to the correct conversation
+            if self.app.active_branch:
+                branch_id = self.app.active_branch
+                if branch_id in self.app.branch_conversations:
+                    self.app.branch_conversations[branch_id]['conversation'].append(placeholder_msg)
+                    self.app.left_pane.conversation = self.app.branch_conversations[branch_id]['conversation']
+            else:
+                if not hasattr(self.app, 'main_conversation'):
+                    self.app.main_conversation = []
+                self.app.main_conversation.append(placeholder_msg)
+                self.app.left_pane.conversation = self.app.main_conversation
+            
+            # Now render - this creates a widget for our placeholder
+            self.app.left_pane.render_conversation()
             
             # Calculate and update latency on first chunk
             if hasattr(self, '_request_start_time') and hasattr(self.app, 'update_signal_latency'):
@@ -1268,21 +1624,137 @@ class ConversationManager:
         # Append chunk to buffer
         self._streaming_buffers[ai_name] += chunk
         
-        # Display the chunk in the GUI
-        self.app.left_pane.append_text(chunk, "ai")
+        # Update the placeholder message content in the conversation data
+        if hasattr(self, '_streaming_messages') and ai_name in self._streaming_messages:
+            self._streaming_messages[ai_name]["content"] = self._streaming_buffers[ai_name]
+        
+        # CRITICAL: Directly update the specific widget for this AI
+        # Do NOT call render_conversation() - that causes cross-contamination when multiple AIs stream
+        self.app.left_pane.update_streaming_widget(ai_name, self._streaming_buffers[ai_name])
+    
+    def on_ai_started(self, ai_name, model):
+        """Handle AI starting to process - update status"""
+        print(f"[Typing] {ai_name} ({model}) started processing")
+        
+        # Update iteration counter with current AI
+        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
+        current_turn = getattr(self.app, 'turn_count', 0) + 1
+        self.app.update_iteration(current_turn, max_iterations, ai_name)
+        
+        # Extract AI number for styling
+        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        
+        # Typing indicator disabled - simplifies rendering flow
+        # Status bar iteration counter now shows which AI is responding
+        return
+        
+        # --- OLD TYPING INDICATOR CODE (disabled) ---
+        # Create typing indicator message
+        typing_message = {
+            "role": "assistant",
+            "content": "",  # Empty content - the render function will show the animation
+            "ai_name": ai_name,
+            "model": model,
+            "_type": "typing_indicator",
+            "_ai_number": ai_number
+        }
+        
+        # Store reference for removal later
+        if not hasattr(self, '_typing_indicators'):
+            self._typing_indicators = {}
+        self._typing_indicators[ai_name] = typing_message
+        
+        # No animation timer needed - using static "thinking..." text
+        
+        # Add to conversation and render
+        if self.app.active_branch:
+            branch_id = self.app.active_branch
+            if branch_id in self.app.branch_conversations:
+                self.app.branch_conversations[branch_id]['conversation'].append(typing_message)
+                self.app.left_pane.conversation = self.app.branch_conversations[branch_id]['conversation']
+        else:
+            if not hasattr(self.app, 'main_conversation'):
+                self.app.main_conversation = []
+            self.app.main_conversation.append(typing_message)
+            self.app.left_pane.conversation = self.app.main_conversation
+        
+        self.app.left_pane.render_conversation()
+    
+    def _update_typing_animation(self):
+        """Update the typing animation dots - DISABLED, using static text"""
+        # Timer should not be running, but stop it if it is
+        if hasattr(self, '_typing_animation_timer') and self._typing_animation_timer.isActive():
+            self._typing_animation_timer.stop()
+    
+    def _remove_typing_indicator(self, ai_name):
+        """Remove typing indicator for an AI"""
+        if not hasattr(self, '_typing_indicators') or ai_name not in self._typing_indicators:
+            return
+        
+        typing_message = self._typing_indicators[ai_name]
+        del self._typing_indicators[ai_name]
+        
+        # Remove from conversation
+        if self.app.active_branch:
+            branch_id = self.app.active_branch
+            if branch_id in self.app.branch_conversations:
+                conv = self.app.branch_conversations[branch_id]['conversation']
+                if typing_message in conv:
+                    conv.remove(typing_message)
+        else:
+            if hasattr(self.app, 'main_conversation') and typing_message in self.app.main_conversation:
+                self.app.main_conversation.remove(typing_message)
+    
+    def _clear_all_typing_indicators(self):
+        """Remove all typing indicators from conversation"""
+        if not hasattr(self, '_typing_indicators'):
+            return
+        
+        # Copy keys since we're modifying the dict
+        ai_names = list(self._typing_indicators.keys())
+        for ai_name in ai_names:
+            self._remove_typing_indicator(ai_name)
     
     def on_ai_response_received(self, ai_name, response_content):
         """Handle AI responses for both main and branch conversations"""
         print(f"Response received from {ai_name}: {response_content[:100]}...")
         
-        # Clear streaming buffer for this AI
+        # Remove typing indicator for this AI
+        self._remove_typing_indicator(ai_name)
+        
+        # Check if we have a streaming placeholder for this AI
+        has_streaming_placeholder = (
+            hasattr(self, '_streaming_messages') and 
+            ai_name in self._streaming_messages
+        )
+        
+        # Get streaming tracking data BEFORE clearing
         if hasattr(self, '_streaming_buffers') and ai_name in self._streaming_buffers:
             del self._streaming_buffers[ai_name]
+        if hasattr(self, '_streaming_messages') and ai_name in self._streaming_messages:
+            streaming_msg = self._streaming_messages[ai_name]
+            del self._streaming_messages[ai_name]
+        else:
+            streaming_msg = None
         
         # Parse response for agentic commands
         cleaned_content, commands = parse_commands(response_content)
         
-        # Execute any commands found and add notifications to conversation
+        # Extract AI number for model lookup
+        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        
+        # CRITICAL: Update streaming message content FIRST, before any notifications
+        # This ensures the widget shows cleaned content during notification renders
+        if has_streaming_placeholder and streaming_msg:
+            streaming_msg["content"] = cleaned_content
+            streaming_msg["model"] = self.get_model_for_ai(ai_number)
+            # Update widget directly so it shows cleaned content
+            self.app.left_pane.update_streaming_widget(ai_name, cleaned_content)
+            # Remove streaming flag now that content is finalized
+            if "_streaming" in streaming_msg:
+                del streaming_msg["_streaming"]
+        
+        # Now execute commands and add notifications
         if commands:
             print(f"[Agent] Found {len(commands)} command(s) in {ai_name}'s response")
             
@@ -1291,13 +1763,25 @@ class ConversationManager:
                 print(f"[Agent] Command result: success={success}, message={message}")
                 
                 # Add notification as a system message in the conversation
+                import uuid
+                notification_id = str(uuid.uuid4())[:8]
                 notification_msg = {
                     "role": "system",
                     "content": message,
-                    "_type": "agent_notification"
+                    "_type": "agent_notification",
+                    "_command_success": success,
+                    "_notification_id": notification_id
                 }
                 
-                # Add to the correct conversation
+                # For in-progress notifications (success=None), store ID for later removal
+                if success is None and "(generating...)" in message:
+                    if not hasattr(self, '_pending_notifications'):
+                        self._pending_notifications = {}
+                    prompt_key = cmd.params.get('prompt', '')[:50] if cmd.params else ''
+                    self._pending_notifications[f"{ai_name}:{prompt_key}"] = notification_id
+                    print(f"[Agent] Stored pending notification ID: {notification_id} for {ai_name}:{prompt_key[:30]}...")
+                
+                # Add to the correct conversation (no render yet - batch it)
                 if self.app.active_branch:
                     branch_id = self.app.active_branch
                     if branch_id in self.app.branch_conversations:
@@ -1314,58 +1798,81 @@ class ConversationManager:
                     self.app.notification_label.setText(message)
         
         # Use cleaned content (commands stripped out) for the conversation
-        response_content = cleaned_content if cleaned_content else response_content
+        response_content = cleaned_content
         
-        # Extract AI number from ai_name (e.g., "AI-1" -> 1)
-        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        # If the AI only sent commands with no other text, handle appropriately
+        if not response_content or not response_content.strip():
+            print(f"[Agent] {ai_name}'s response was only commands, skipping empty message")
+            # If there was a streaming placeholder, we need to remove it
+            # since cleaned_content is empty (was only commands)
+            if has_streaming_placeholder and streaming_msg:
+                # Remove the streaming placeholder from conversation
+                if self.app.active_branch:
+                    branch_id = self.app.active_branch
+                    if branch_id in self.app.branch_conversations:
+                        conv = self.app.branch_conversations[branch_id]['conversation']
+                        if streaming_msg in conv:
+                            conv.remove(streaming_msg)
+                        self.app.left_pane.conversation = conv
+                else:
+                    if streaming_msg in self.app.main_conversation:
+                        self.app.main_conversation.remove(streaming_msg)
+                    self.app.left_pane.conversation = self.app.main_conversation
+            # Do final render to show notifications (if any)
+            self._final_render_after_response()
+            return
         
-        # Format the AI response with proper metadata
-        ai_message = {
-            "role": "assistant",
-            "content": response_content,
-            "ai_name": ai_name,  # Add AI name to the message
-            "model": self.get_model_for_ai(ai_number)  # Get the selected model name
-        }
-        
-        # Check if we're in a branch or main conversation
-        if self.app.active_branch:
-            # Branch conversation
-            branch_id = self.app.active_branch
-            if branch_id in self.app.branch_conversations:
-                branch_data = self.app.branch_conversations[branch_id]
-                conversation = branch_data['conversation']
-                
-                # Add AI response to conversation
-                conversation.append(ai_message)
-                
-                # Debug: Check for notifications
-                notifications = [m for m in conversation if m.get('_type') == 'agent_notification']
-                print(f"[Debug] Branch conversation has {len(notifications)} notifications before display")
-                
-                # Update the conversation display - filter out hidden messages
-                visible_conversation = [msg for msg in conversation if not msg.get('hidden', False)]
-                self.app.left_pane.display_conversation(visible_conversation, branch_data)
+        # If there was a streaming placeholder, content was already updated above
+        # Just need to do the final render
+        if has_streaming_placeholder and streaming_msg:
+            self._final_render_after_response()
         else:
-            # Main conversation
-            if not hasattr(self.app, 'main_conversation'):
-                self.app.main_conversation = []
+            # No streaming placeholder - add message normally
+            ai_message = {
+                "role": "assistant",
+                "content": response_content,
+                "ai_name": ai_name,
+                "model": self.get_model_for_ai(ai_number)
+            }
             
-            # Add AI response to main conversation
-            self.app.main_conversation.append(ai_message)
+            # Add to conversation
+            if self.app.active_branch:
+                branch_id = self.app.active_branch
+                if branch_id in self.app.branch_conversations:
+                    self.app.branch_conversations[branch_id]['conversation'].append(ai_message)
+            else:
+                if not hasattr(self.app, 'main_conversation'):
+                    self.app.main_conversation = []
+                self.app.main_conversation.append(ai_message)
             
-            # Debug: Check for notifications
-            notifications = [m for m in self.app.main_conversation if m.get('_type') == 'agent_notification']
-            print(f"[Debug] Main conversation has {len(notifications)} notifications before display")
-            
-            # Update the conversation display - filter out hidden messages
-            visible_conversation = [msg for msg in self.app.main_conversation if not msg.get('hidden', False)]
-            self.app.left_pane.display_conversation(visible_conversation)
+            self._final_render_after_response()
         
         # Update status bar
         self.app.statusBar().showMessage(f"Received response from {ai_name}")
+    
+    def _final_render_after_response(self):
+        """Do a final render after processing an AI response.
+        
+        Uses immediate render to prevent race conditions with other streaming AIs.
+        """
+        if self.app.active_branch:
+            branch_id = self.app.active_branch
+            if branch_id in self.app.branch_conversations:
+                branch_data = self.app.branch_conversations[branch_id]
+                visible = [msg for msg in branch_data['conversation'] if not msg.get('hidden', False)]
+                self.app.left_pane.conversation = visible
+                self.app.left_pane.render_conversation(immediate=True)
+        else:
+            visible = [msg for msg in self.app.main_conversation if not msg.get('hidden', False)]
+            self.app.left_pane.conversation = visible
+            self.app.left_pane.render_conversation(immediate=True)
         
     def on_ai_result_received(self, ai_name, result):
-        """Handle the complete AI result"""
+        """Handle the complete AI result - for non-display tasks only.
+        
+        NOTE: Message display is handled by on_ai_response_received.
+        This handler is only for side effects like auto-image generation, Sora, etc.
+        """
         print(f"Result received from {ai_name}")
         
         # Determine which conversation to update
@@ -1383,24 +1890,8 @@ class ConversationManager:
                     self.app.left_pane.append_text("\nGenerating an image based on this response...\n", "system")
                     self.generate_and_display_image(response_content, ai_name)
         
-        # Display result content
-        if isinstance(result, dict):
-            if "display" in result and SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT:
-                self.app.left_pane.append_text(f"\n{ai_name} ({result.get('model', '')}):\n\n", "header")
-                cot_parts = result['display'].split('[Final Answer]')
-                if len(cot_parts) > 1:
-                    self.app.left_pane.append_text(cot_parts[0].strip(), "chain_of_thought")
-                    self.app.left_pane.append_text('\n\n[Final Answer]\n', "header")
-                    self.app.left_pane.append_text(cot_parts[1].strip(), "ai")
-                else:
-                    self.app.left_pane.append_text(result['display'], "ai")
-            elif "content" in result:
-                self.app.left_pane.append_text(f"\n{ai_name} ({result.get('model', '')}):\n\n", "header")
-                self.app.left_pane.append_text(result['content'], "ai")
-            elif "image_url" in result:
-                self.app.left_pane.append_text(f"\n{ai_name} ({result.get('model', '')}):\n\nGenerating an image based on the prompt...\n")
-                if hasattr(self.app.left_pane, 'display_image'):
-                    self.app.left_pane.display_image(result['image_url'])
+        # NOTE: Content display removed - handled by on_ai_response_received
+        # The old code was appending headers and content here, causing duplication
 
         # Optionally trigger Sora video generation from AI-1 responses (no GUI embedding)
         try:
@@ -1438,14 +1929,7 @@ class ConversationManager:
         except Exception as e:
             print(f"Auto Sora trigger error: {e}")
         
-        # Update the conversation display
-        visible_conversation = [msg for msg in conversation if not msg.get('hidden', False)]
-        if self.app.active_branch:
-            branch_id = self.app.active_branch
-            branch_data = self.app.branch_conversations[branch_id]
-            self.app.left_pane.display_conversation(visible_conversation, branch_data)
-        else:
-            self.app.left_pane.display_conversation(visible_conversation)
+        # NOTE: display_conversation removed - handled by on_ai_response_received
             
     def generate_and_display_image(self, text, ai_name):
         """Generate an image based on text and display it in the UI"""
@@ -1474,8 +1958,9 @@ class ConversationManager:
             # Find the most recent message from this AI
             for msg in reversed(conversation):
                 if msg.get("ai_name") == ai_name and msg.get("role") == "assistant":
-                    # Add the image path to the message
+                    # Add the image path and model to the message
                     msg["generated_image_path"] = image_path
+                    msg["image_model"] = result.get("model", "unknown")
                     print(f"Added generated image {image_path} to message from {ai_name}")
                     break
             
@@ -1517,12 +2002,6 @@ class ConversationManager:
             return self._execute_image_command(params.get('prompt', ''), ai_name)
         elif action == 'video':
             return self._execute_video_command(params.get('prompt', ''), ai_name)
-        elif action == 'search':
-            return self._execute_search_command(params.get('query', ''), ai_name)
-        elif action == 'prompt':
-            return self._execute_prompt_command(params.get('text', ''), ai_name)
-        elif action == 'temperature':
-            return self._execute_temperature_command(params.get('value', ''), ai_name)
         elif action == 'add_ai':
             return self._execute_add_ai_command(params.get('model', ''), params.get('persona'), ai_name)
         elif action == 'remove_ai':
@@ -1531,18 +2010,27 @@ class ConversationManager:
             return self._execute_list_models_command(ai_name)
         elif action == 'mute_self':
             return self._execute_mute_command(ai_name)
+        elif action == 'search':
+            return self._execute_search_command(params.get('query', ''), ai_name)
+        elif action == 'prompt':
+            return self._execute_prompt_command(params.get('text', ''), ai_name)
+        elif action == 'temperature':
+            return self._execute_temperature_command(params.get('value'), ai_name)
         else:
-            return False, f"Unknown command: {action}"
+            # Get AI's model name for consistent formatting
+            ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+            model_name = self.get_model_for_ai(ai_num)
+            return False, f"❌ [{ai_name} ({model_name})]: !{action} — unknown command"
     
     def _execute_image_command(self, prompt: str, ai_name: str, model_name: str = None) -> tuple[bool, str]:
         """Execute an image generation command."""
-        if not prompt or len(prompt.strip()) < 5:
-            return False, "Image prompt too short"
-        
-        # Get model name if not provided
+        # Get model name early for consistent logging
         if not model_name:
             ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_number)
+        
+        if not prompt or len(prompt.strip()) < 5:
+            return False, f"❌ [{ai_name} ({model_name})]: !image — prompt too short"
         
         print(f"[Agent] Generating image for {ai_name} ({model_name}): {prompt[:100]}...")
         
@@ -1590,7 +2078,7 @@ class ConversationManager:
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"[{ai_name} ({model_name})]: !image \"{prompt}\"\n<image attached>"
+                                    "text": f"[{ai_name} ({model_name})]: !image \"{prompt}\""
                                 },
                                 {
                                     "type": "image",
@@ -1602,33 +2090,46 @@ class ConversationManager:
                                 }
                             ],
                             "generated_image_path": image_path,
+                            "image_model": result.get("model", "unknown"),
                             "_type": "generated_image",
+                            "_prompt": prompt,  # Store prompt for notification display
                             "ai_name": ai_name,
                             "model": model_name
                         }
+                        
+                        print(f"[Agent] Image message created with _prompt: '{prompt[:50]}...'")
                         
                         # Emit signal to update UI on main thread
                         self.image_signals.image_ready.emit(image_message, image_path)
                         
                     except Exception as e:
                         print(f"[Agent] Could not add image to context: {e}")
+                        self.image_signals.image_failed.emit(ai_name, prompt, str(e))
                         import traceback
                         traceback.print_exc()
                 else:
                     error = result.get('error', 'Unknown error')
                     print(f"[Agent] Image generation failed: {error}")
+                    # Emit failure signal so UI can show error to user and AIs
+                    self.image_signals.image_failed.emit(ai_name, prompt, error)
             except Exception as e:
                 print(f"[Agent] Image generation exception: {e}")
+                self.image_signals.image_failed.emit(ai_name, prompt, str(e))
         
         threading.Thread(target=_run_image_job, daemon=True).start()
-        return True, f"🎨 [{ai_name} ({model_name})]: !image \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
+        # Return None for _command_success to show yellow "in progress" color (not green success)
+        return None, f"🎨 [{ai_name} ({model_name})]: !image \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
     
     def _execute_video_command(self, prompt: str, ai_name: str) -> tuple[bool, str]:
         """Execute a video generation command."""
-        if not prompt or len(prompt.strip()) < 5:
-            return False, "Video prompt too short"
+        # Get model name for consistent formatting
+        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_number)
         
-        print(f"[Agent] Generating video for {ai_name}: {prompt[:100]}...")
+        if not prompt or len(prompt.strip()) < 5:
+            return False, f"❌ [{ai_name} ({model_name})]: !video — prompt too short"
+        
+        print(f"[Agent] Generating video for {ai_name} ({model_name}): {prompt[:100]}...")
         
         # Run video generation in background thread to avoid blocking
         import threading
@@ -1644,30 +2145,48 @@ class ConversationManager:
             
             print(f"[Agent] Sora settings: seconds={sora_seconds}, size={sora_size}")
             
-            result = generate_video_with_sora(
-                prompt=prompt,
-                model=sora_model,
-                seconds=sora_seconds,
-                size=sora_size,
-                poll_interval_seconds=5.0,
-            )
-            if result.get("success"):
-                video_path = result.get('video_path')
-                print(f"[Agent] Video completed: {video_path}")
-                # Track video in session
-                if hasattr(self.app, 'session_videos') and video_path:
-                    self.app.session_videos.append(str(video_path))
-                    # Emit signal to update video preview on main thread (include prompt for status bar)
+            try:
+                result = generate_video_with_sora(
+                    prompt=prompt,
+                    model=sora_model,
+                    seconds=sora_seconds,
+                    size=sora_size,
+                    poll_interval_seconds=5.0,
+                )
+                if result.get("success"):
+                    video_path = result.get('video_path')
+                    print(f"[Agent] Video completed: {video_path}")
+                    # Track video in session
+                    if hasattr(self.app, 'session_videos') and video_path:
+                        self.app.session_videos.append(str(video_path))
+                        # Emit signal to update video preview on main thread (include prompt for status bar)
+                        if hasattr(self, 'video_signals'):
+                            self.video_signals.video_ready.emit(str(video_path), prompt, ai_name, model_name)
+                else:
+                    error = result.get('error', 'Unknown error')
+                    print(f"[Agent] Video failed: {error}")
+                    # Emit failure signal so UI can show error to user and AIs
                     if hasattr(self, 'video_signals'):
-                        self.video_signals.video_ready.emit(str(video_path), prompt)
-            else:
-                print(f"[Agent] Video failed: {result.get('error')}")
+                        self.video_signals.video_failed.emit(ai_name, prompt, error)
+            except Exception as e:
+                print(f"[Agent] Video generation exception: {e}")
+                if hasattr(self, 'video_signals'):
+                    self.video_signals.video_failed.emit(ai_name, prompt, str(e))
         
         threading.Thread(target=_run_video_job, daemon=True).start()
-        return True, f"🎬 [{ai_name}]: !video \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
+        # Return None for _command_success to show yellow "in progress" color (not green success)
+        return None, f"🎬 [{ai_name} ({model_name})]: !video \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
     
     def _execute_add_ai_command(self, model_name: str, persona: str, requesting_ai: str) -> tuple[bool, str]:
         """Execute an add AI participant command."""
+        # Get requester's model name for consistent formatting
+        requester_num = int(requesting_ai.split('-')[1]) if '-' in requesting_ai else 1
+        requester_model = self.get_model_for_ai(requester_num)
+        
+        # Check if model name was provided
+        if not model_name or not model_name.strip():
+            return False, f"❌ [{requesting_ai} ({requester_model})]: !add_ai — no model specified"
+        
         # Get the base number of AIs from the selector (this is the starting count for this round)
         # We DON'T update the selector until the AI actually joins - just track pending count
         base_num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
@@ -1677,24 +2196,78 @@ class ConversationManager:
         effective_count = base_num_ais + pending_count
         
         if effective_count >= 5:
-            return False, "Maximum of 5 AIs already reached"
+            return False, f"❌ [{requesting_ai} ({requester_model})]: !add_ai \"{model_name}\" — maximum of 5 AIs already reached"
         
         new_num = effective_count + 1
         
+        # Get tier setting FIRST - we need this to guide model matching
+        invite_tier_setting = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        print(f"[Agent] Processing !add_ai '{model_name}' with tier setting: {invite_tier_setting}")
+        
         # Try to set the model for the new AI slot
-        actual_model = model_name  # Track what model was actually set
+        actual_model_id = None  # Track the actual model ID
+        actual_display_name = model_name  # Track display name for messages
         selector = getattr(self.app.right_sidebar.control_panel, f'ai{new_num}_model_selector', None)
+        
         if selector:
-            # Find if the requested model exists in the selector
+            # Smart matching: prefer models from the allowed tier
+            # This prevents "Claude" from matching paid Claude when Free tier is selected
             found = False
-            for i in range(selector.count()):
-                if model_name.lower() in selector.itemText(i).lower():
-                    selector.setCurrentIndex(i)
-                    actual_model = selector.itemText(i)
-                    found = True
-                    break
+            
+            # First pass: only match models from the ALLOWED tier
+            if invite_tier_setting in ["Free", "Paid"]:
+                for i in range(selector.count()):
+                    item_text = selector.itemText(i).lower()
+                    if model_name.lower() in item_text:
+                        # Check if this model is from the allowed tier
+                        potential_model_id = selector.get_model_id_at_index(i)
+                        if potential_model_id:
+                            potential_tier = get_model_tier_by_id(potential_model_id)
+                            if potential_tier == invite_tier_setting:
+                                # Found a match in the allowed tier!
+                                selector.setCurrentIndex(i)
+                                actual_display_name = selector.itemText(i)
+                                actual_model_id = potential_model_id
+                                found = True
+                                print(f"[Agent] Matched '{model_name}' to {actual_display_name} ({potential_tier} tier)")
+                                break
+            
+            # Second pass: if tier is "Both" OR no match in allowed tier, search all
             if not found:
-                actual_model = selector.currentText()  # Use whatever is default
+                for i in range(selector.count()):
+                    if model_name.lower() in selector.itemText(i).lower():
+                        selector.setCurrentIndex(i)
+                        actual_display_name = selector.itemText(i)
+                        actual_model_id = selector.get_model_id_at_index(i)
+                        found = True
+                        print(f"[Agent] Fallback matched '{model_name}' to {actual_display_name}")
+                        break
+            
+            if not found:
+                # Use whatever is default
+                actual_display_name = selector.currentText()
+                actual_model_id = selector.get_selected_model_id()
+                print(f"[Agent] No match for '{model_name}', using default: {actual_display_name}")
+        
+        # Fallback if we couldn't get the model ID
+        if not actual_model_id:
+            actual_model_id = actual_display_name
+        
+        # If actual_display_name is still empty, use original model_name
+        if not actual_display_name:
+            actual_display_name = model_name if model_name else "(no model specified)"
+        
+        # Final tier check - enforce the setting even for fallback matches
+        model_tier = get_model_tier_by_id(actual_model_id)
+        print(f"[Agent] Final model: {actual_model_id} (tier: {model_tier})")
+        
+        if invite_tier_setting == "Free" and model_tier != "Free":
+            print(f"[Agent] BLOCKED: {actual_model_id} is {model_tier}, but only Free allowed")
+            return False, f"❌ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\" — only FREE models allowed"
+        elif invite_tier_setting == "Paid" and model_tier != "Paid":
+            print(f"[Agent] BLOCKED: {actual_model_id} is {model_tier}, but only Paid allowed")
+            return False, f"❌ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\" — only PAID models allowed"
+        # "Both" allows everything
         
         # Store persona for later use (could be used to modify system prompt)
         if persona:
@@ -1707,19 +2280,23 @@ class ConversationManager:
             self._pending_ais = []
         
         # Check if this model is already an active AI (deduplication)
-        for i in range(1, base_num_ais + 1):
-            existing_selector = getattr(self.app.right_sidebar.control_panel, f'ai{i}_model_selector', None)
-            if existing_selector:
-                existing_model = existing_selector.currentText()
-                if actual_model.lower() in existing_model.lower() or existing_model.lower() in actual_model.lower():
-                    print(f"[Agent] {actual_model} already active as AI-{i}, skipping duplicate")
-                    return True, f"✨ {actual_model} is already in the conversation as AI-{i}"
+        # Check setting for whether duplicates are allowed
+        allow_duplicates = getattr(self.app.right_sidebar.control_panel, 'allow_duplicate_models_checkbox', None)
+        if allow_duplicates and not allow_duplicates.isChecked():
+            for i in range(1, base_num_ais + 1):
+                existing_selector = getattr(self.app.right_sidebar.control_panel, f'ai{i}_model_selector', None)
+                if existing_selector:
+                    existing_model_id = existing_selector.get_selected_model_id()
+                    if existing_model_id and actual_model_id:
+                        if actual_model_id.lower() == existing_model_id.lower():
+                            print(f"[Agent] {actual_model_id} already active as AI-{i}, skipping duplicate")
+                            return None, f"ℹ️ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\" — already in conversation as AI-{i}"
         
-        # Check if this model was already invited this round (pending deduplication)
-        already_pending = any(p['model'].lower() in actual_model.lower() or actual_model.lower() in p['model'].lower() for p in self._pending_ais)
+        # Check if this model was already invited this round (pending deduplication - always enforce)
+        already_pending = any(p['model'].lower() == actual_model_id.lower() for p in self._pending_ais)
         if already_pending:
-            print(f"[Agent] {actual_model} already invited this round, skipping duplicate")
-            return True, f"✨ {actual_model} was already invited (by another AI)"
+            print(f"[Agent] {actual_model_id} already invited this round, skipping duplicate")
+            return None, f"ℹ️ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\" — already invited this round"
         
         # DON'T update the selector here - it will be updated when the AI actually joins
         # This prevents double-counting when multiple AIs are invited in the same round
@@ -1727,64 +2304,125 @@ class ConversationManager:
         self._pending_ais.append({
             'ai_name': f"AI-{new_num}",
             'ai_number': new_num,
-            'model': actual_model,
+            'model': actual_model_id,  # Store the model ID, not display name
+            'display_name': actual_display_name,  # Keep display name for messages
             'persona': persona,
             'invited_by': requesting_ai
         })
-        print(f"[Agent] Queued AI-{new_num} ({actual_model}) to join current round")
+        print(f"[Agent] Queued AI-{new_num} ({actual_model_id}) to join current round")
         print(f"[Agent] Current pending queue: {[p['ai_name'] + ' -> ' + p['model'] for p in self._pending_ais]}")
         
         # Create a friendly notification message that shows the command syntax
         if persona:
-            return True, f"✨ [{requesting_ai}]: !add_ai \"{actual_model}\" \"{persona}\""
+            return True, f"✨ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\" \"{persona}\""
         else:
-            return True, f"✨ [{requesting_ai}]: !add_ai \"{actual_model}\""
+            return True, f"✨ [{requesting_ai} ({requester_model})]: !add_ai \"{actual_display_name}\""
     
     def _execute_remove_ai_command(self, target: str, requesting_ai: str) -> tuple[bool, str]:
         """Execute a remove AI participant command (requires consensus in future)."""
+        # Get requester's model name for consistent formatting
+        requester_num = int(requesting_ai.split('-')[1]) if '-' in requesting_ai else 1
+        requester_model = self.get_model_for_ai(requester_num)
         # For now, just log the request - could implement voting system later
-        return False, f"🗳️ {requesting_ai} voted to remove {target} (consensus not yet implemented)"
+        return False, f"🗳️ [{requesting_ai} ({requester_model})]: !remove_ai \"{target}\" — consensus not yet implemented"
     
     def _execute_list_models_command(self, ai_name: str) -> tuple[bool, str]:
         """Execute a list models command - returns available models for invitation."""
+        # Get AI's model name for consistent formatting
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
         try:
             models_file = os.path.join(os.path.dirname(__file__), 'available_models.txt')
             if os.path.exists(models_file):
                 with open(models_file, 'r', encoding='utf-8') as f:
                     models_content = f.read()
                 print(f"[Agent] {ai_name} queried available models")
-                return True, f"📋 Available models:\n{models_content}"
+                return True, f"📋 [{ai_name} ({model_name})]: !list_models\n{models_content}"
             else:
-                return False, "Models list not found"
+                return False, f"❌ [{ai_name} ({model_name})]: !list_models — models list not found"
         except Exception as e:
-            return False, f"Error reading models: {e}"
+            return False, f"❌ [{ai_name} ({model_name})]: !list_models — error: {e}"
     
     def _execute_mute_command(self, ai_name: str) -> tuple[bool, str]:
         """Execute a mute self command - AI skips next turn."""
+        # Get AI's model name for consistent formatting
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
         if not hasattr(self.app, 'muted_ais'):
             self.app.muted_ais = set()
-        
+
         self.app.muted_ais.add(ai_name)
-        return True, f"🔇 [{ai_name}]: !mute_self"
-    
+        return True, f"🔇 [{ai_name} ({model_name})]: !mute_self"
+
+    def _execute_search_command(self, query: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a web search command and inject results into conversation."""
+        from shared_utils import web_search
+
+        # Get AI's model name for consistent formatting
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
+        if not query or len(query.strip()) < 3:
+            return False, f"❌ [{ai_name} ({model_name})]: !search — query too short"
+
+        print(f"[Agent] Searching for {ai_name} ({model_name}): {query}")
+
+        # Perform the search
+        search_result = web_search(query, max_results=5)
+
+        if not search_result.get('success'):
+            error_msg = search_result.get('error', 'Unknown error')
+            return False, f"❌ [{ai_name} ({model_name})]: !search \"{query}\" — {error_msg}"
+
+        # Format results for display
+        results = search_result.get('results', [])
+        if not results:
+            return False, f"❌ [{ai_name} ({model_name})]: !search \"{query}\" — no results found"
+
+        # Format results for conversation context (with markdown formatting)
+        formatted = f"🔍 [{ai_name} ({model_name})]: !search \"{query}\"\n\n**Search Results:**\n"
+        for i, r in enumerate(results, 1):
+            formatted += f"\n{i}. **{r.get('title', 'No title')}**\n"
+            formatted += f"   {r.get('snippet', 'No snippet')}\n"
+            formatted += f"   Source: {r.get('url', 'No URL')}\n"
+
+        # Add search results to conversation so all AIs can see them
+        search_message = {
+            "role": "user",
+            "content": formatted,
+            "_type": "search_result",
+            "hidden": False
+        }
+        self.app.main_conversation.append(search_message)
+
+        # Trigger UI update by redisplaying conversation
+        self.app.left_pane.display_conversation(self.app.main_conversation)
+
+        return True, f"🔍 [{ai_name} ({model_name})]: !search \"{query}\" (found {len(results)} results)"
+
     def _execute_prompt_command(self, text: str, ai_name: str) -> tuple[bool, str]:
         """Execute a prompt addition command - AI appends to their own system prompt.
         Note: !prompt commands are stripped from conversation context so other AIs don't see them,
         but the full text is shown in the GUI notification for the human operator.
         A subtle notification is added to context so other AIs know the action occurred."""
+        # Get AI's model name for consistent formatting
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
         if not text or len(text.strip()) < 3:
-            return False, "Prompt text too short"
-        
-        # Initialize if needed
+            return False, f"❌ [{ai_name} ({model_name})]: !prompt — prompt text too short"
+
+        # Initialize list if needed
         if ai_name not in self.ai_prompt_additions:
             self.ai_prompt_additions[ai_name] = []
-        
-        # Add the new prompt text
+
+        # Add the new prompt text (appends, doesn't replace)
         self.ai_prompt_additions[ai_name].append(text.strip())
-        
-        print(f"[Agent] {ai_name} added to their prompt: {text[:50]}...")
+
+        print(f"[Agent] {ai_name} ({model_name}) added to their prompt: {text[:50]}...")
         print(f"[Agent] {ai_name} now has {len(self.ai_prompt_additions[ai_name])} prompt additions")
-        
+
         # Add a subtle notification to conversation context (visible to other AIs)
         # This lets them know the action occurred without revealing the content
         context_notification = {
@@ -1793,92 +2431,49 @@ class ConversationManager:
             "_type": "system_notification"
         }
         self.app.main_conversation.append(context_notification)
-        
+
+        # Trigger UI update by redisplaying conversation
+        self.app.left_pane.display_conversation(self.app.main_conversation)
+
         # Show full untruncated text in notification (only human sees this, not other AIs)
-        return True, f"💭 [{ai_name}]: !prompt \"{text}\""
-    
-    def get_prompt_additions_for_ai(self, ai_name: str) -> str:
-        """Get all prompt additions for a specific AI as a formatted string."""
-        if ai_name not in self.ai_prompt_additions or not self.ai_prompt_additions[ai_name]:
-            return ""
-        
-        additions = self.ai_prompt_additions[ai_name]
-        return "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(additions)
-    
+        return True, f"💭 [{ai_name} ({model_name})]: !prompt \"{text}\""
+
     def _execute_temperature_command(self, value: str, ai_name: str) -> tuple[bool, str]:
         """Execute a temperature modification command - AI sets their own sampling temperature.
         Note: !temperature commands are stripped from conversation context."""
+        # Get AI's model name for consistent formatting
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
+        # Validate temperature value
         try:
             temp = float(value)
             if temp < 0 or temp > 2:
-                return False, f"Temperature must be between 0 and 2 (got {temp})"
-            
-            self.ai_temperatures[ai_name] = temp
-            print(f"[Agent] {ai_name} set their temperature to {temp}")
-            
-            # Add a subtle notification to conversation context (visible to other AIs)
-            context_notification = {
-                "role": "user",
-                "content": f"[{ai_name} adjusted their temperature]",
-                "_type": "system_notification"
-            }
-            self.app.main_conversation.append(context_notification)
-            
-            # Show the actual value in notification for human
-            return True, f"🌡️ [{ai_name}]: !temperature {temp}"
+                return False, f"❌ [{ai_name} ({model_name})]: !temperature {value} — must be between 0 and 2"
         except (ValueError, TypeError):
-            return False, f"Invalid temperature value: {value}"
-    
-    def get_temperature_for_ai(self, ai_name: str) -> float:
-        """Get the temperature setting for a specific AI (default 1.0)."""
-        return self.ai_temperatures.get(ai_name, 1.0)
-    
-    def _execute_search_command(self, query: str, ai_name: str) -> tuple[bool, str]:
-        """Execute a web search command and inject results into conversation."""
-        if not query or len(query.strip()) < 3:
-            return False, "Search query too short"
-        
-        from shared_utils import web_search
-        
-        # Get model name for the AI
-        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
-        model_name = self.get_model_for_ai(ai_number)
-        
-        print(f"[Agent] Searching for {ai_name} ({model_name}): {query}")
-        
-        result = web_search(query, max_results=5)
-        
-        if result.get("success"):
-            results = result.get("results", [])
-            if results:
-                # Format results for conversation context
-                formatted = f"🔍 [{ai_name} ({model_name})]: !search \"{query}\"\n\n**Search Results:**\n"
-                for i, r in enumerate(results, 1):
-                    formatted += f"\n{i}. **{r['title']}**\n"
-                    formatted += f"   {r['snippet']}\n"
-                    formatted += f"   Source: {r['url']}\n"
-                
-                # Add search results to conversation so all AIs can see them
-                search_message = {
-                    "role": "user",
-                    "content": formatted,
-                    "_type": "search_result",
-                    "hidden": False
-                }
-                self.app.main_conversation.append(search_message)
-                
-                # Also display in the UI
-                self.app.left_pane.append_text(f"\n{formatted}\n", "system")
-                
-                return True, f"🔍 [{ai_name}]: !search \"{query}\" (found {len(results)} results)"
-            else:
-                return False, f"No results found for: {query}"
-        else:
-            error = result.get('error', 'Unknown error')
-            return False, f"Search failed: {error}"
+            return False, f"❌ [{ai_name} ({model_name})]: !temperature — invalid value '{value}'"
+
+        # Store the temperature for this AI
+        self.ai_temperatures[ai_name] = temp
+
+        print(f"[Agent] {ai_name} ({model_name}) set their temperature to {temp}")
+
+        # Add a subtle notification to conversation context (visible to other AIs)
+        context_notification = {
+            "role": "user",
+            "content": f"[{ai_name} adjusted their temperature]",
+            "_type": "system_notification"
+        }
+        self.app.main_conversation.append(context_notification)
+
+        # Trigger UI update by redisplaying conversation
+        self.app.left_pane.display_conversation(self.app.main_conversation)
+
+        # Show the actual value in notification for human
+        return True, f"🌡️ [{ai_name} ({model_name})]: !temperature {temp}"
     
     def get_model_for_ai(self, ai_number):
-        """Get the selected model name for the AI by number (1-5)"""
+        """Get the selected model ID for the AI by number (1-5)"""
         selectors = {
             1: self.app.right_sidebar.control_panel.ai1_model_selector,
             2: self.app.right_sidebar.control_panel.ai2_model_selector,
@@ -1886,14 +2481,34 @@ class ConversationManager:
             4: self.app.right_sidebar.control_panel.ai4_model_selector,
             5: self.app.right_sidebar.control_panel.ai5_model_selector
         }
-        return selectors.get(ai_number, selectors[1]).currentText()
-    
+        selector = selectors.get(ai_number, selectors[1])
+        # Use get_selected_model_id() to get the actual model ID, not display name
+        model_id = selector.get_selected_model_id()
+        return model_id if model_id else selector.currentText()  # Fallback to text if no ID
+
+    def get_prompt_additions_for_ai(self, ai_name: str) -> str:
+        """Get all prompt additions for a specific AI as a formatted string."""
+        if ai_name not in self.ai_prompt_additions or not self.ai_prompt_additions[ai_name]:
+            return ""
+
+        additions = self.ai_prompt_additions[ai_name]
+        return "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(additions)
+
+    def get_temperature_for_ai(self, ai_name: str) -> float:
+        """Get the temperature setting for a specific AI (default 1.0)."""
+        return self.ai_temperatures.get(ai_name, 1.0)
+
     def on_ai_error(self, error_message):
         """Handle AI errors for both main and branch conversations"""
+        # Clear all typing indicators on error
+        self._clear_all_typing_indicators()
+        
         # Format the error message
         error_message_formatted = {
             "role": "system",
-            "content": f"Error: {error_message}"
+            "content": f"Error: {error_message}",
+            "_type": "agent_notification",
+            "_command_success": False  # Show as error notification
         }
         
         # Check if we're in a branch or main conversation
@@ -2161,12 +2776,16 @@ class ConversationManager:
         # Get max iterations
         max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         
+        # Get invite tier setting
+        invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        
         # Create worker threads for AI-1, AI-2, and AI-3
-        worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
-        worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
-        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+        worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
+        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
         
         # Connect signals for worker1
+        worker1.signals.started.connect(self.on_ai_started)
         worker1.signals.response.connect(self.on_ai_response_received)
         worker1.signals.result.connect(self.on_ai_result_received)
         worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -2174,6 +2793,7 @@ class ConversationManager:
         worker1.signals.error.connect(self.on_ai_error)
         
         # Connect signals for worker2
+        worker2.signals.started.connect(self.on_ai_started)
         worker2.signals.response.connect(self.on_ai_response_received)
         worker2.signals.result.connect(self.on_ai_result_received)
         worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -2181,6 +2801,7 @@ class ConversationManager:
         worker2.signals.error.connect(self.on_ai_error)
         
         # Connect signals for worker3
+        worker3.signals.started.connect(self.on_ai_started)
         worker3.signals.response.connect(self.on_ai_response_received)
         worker3.signals.result.connect(self.on_ai_result_received)
         worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
@@ -2195,259 +2816,293 @@ class ConversationManager:
         try:
             from datetime import datetime
             
-            # Create a filename for the full conversation HTML
-            html_file = "conversation_full.html"
+            # Create a filename for the full conversation HTML using session timestamp
+            from config import OUTPUTS_DIR
+            
+            # Get session timestamp from main window, or create new one
+            session_timestamp = getattr(self.app, 'session_timestamp', datetime.now().strftime("%Y%m%d_%H%M%S"))
+            html_filename = f"conversation_{session_timestamp}.html"
+            html_file = os.path.join(OUTPUTS_DIR, html_filename)
+            
+            # Store the current file path on the app for export/view functionality
+            self.app.current_html_file = html_file
             
             # Generate HTML content for the conversation
             html_content = """<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Liminal Backrooms</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="../assets/app-icon.ico">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #0a0a0f;
-            --bg-panel: #12121a;
-            --bg-message: #1a1a24;
-            --border-glow: #2a2a3a;
-            --text-primary: #e8e8f0;
-            --text-dim: #8888a0;
-            --accent-cyan: #00ffd0;
-            --accent-purple: #b388ff;
-            --accent-blue: #4fc3f7;
-            --accent-orange: #ffab40;
-            --accent-pink: #ff4081;
+            --bg-dark: #0A0E1A;
+            --bg-panel: #111827;
+            --bg-message: #151C2C;
+            --border: #1E293B;
+            --border-glow: #06B6D4;
+            --text-primary: #CBD5E1;
+            --text-dim: #64748B;
+            --text-bright: #F1F5F9;
+            --accent-cyan: #06B6D4;
+            --accent-purple: #A855F7;
+            --accent-pink: #EC4899;
+            --accent-green: #10B981;
+            --accent-yellow: #FBBF24;
+            --ai-1: #6FFFE6;
+            --ai-2: #06E2D4;
+            --ai-3: #54F5E9;
+            --ai-4: #8BFCEF;
+            --ai-5: #91FCFD;
+            --human: #ff00b3;
         }
         
-        * { box-sizing: border-box; }
+        * { 
+            box-sizing: border-box; 
+            margin: 0;
+            padding: 0;
+        }
         
         body { 
-            font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-            margin: 0; 
-            padding: 0;
-            line-height: 1.7; 
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.5; 
             color: var(--text-primary);
             background: var(--bg-dark);
-            background-image: 
-                radial-gradient(ellipse at top, rgba(0, 255, 208, 0.03) 0%, transparent 50%),
-                radial-gradient(ellipse at bottom, rgba(179, 136, 255, 0.03) 0%, transparent 50%);
             min-height: 100vh;
         }
         
         .container {
-            max-width: 900px;
+            max-width: 860px;
             margin: 0 auto;
-            padding: 40px 20px;
+            padding: 24px 16px;
         }
         
+        /* Header - retro terminal style */
         header {
             text-align: center;
-            margin-bottom: 50px;
-            padding: 40px 20px;
-            background: linear-gradient(135deg, rgba(0, 255, 208, 0.05) 0%, rgba(179, 136, 255, 0.05) 100%);
+            margin-bottom: 32px;
+            padding: 20px 16px;
+            background: var(--bg-panel);
             border: 1px solid var(--border-glow);
-            border-radius: 16px;
+            border-top: 3px solid var(--accent-cyan);
             position: relative;
-            overflow: hidden;
         }
         
-        header::before {
+        header::after {
             content: '';
             position: absolute;
-            top: 0;
+            bottom: 0;
             left: 0;
             right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent-cyan), var(--accent-purple), transparent);
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent-purple), transparent);
         }
         
         h1 { 
             font-family: 'JetBrains Mono', monospace;
             color: var(--accent-cyan);
-            font-size: 2.2em;
-            margin: 0 0 10px 0;
+            font-size: 1.4em;
+            margin: 0 0 6px 0;
             font-weight: 500;
-            letter-spacing: 2px;
+            letter-spacing: 4px;
             text-transform: uppercase;
-            text-shadow: 0 0 30px rgba(0, 255, 208, 0.3);
+            text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
         }
         
         .subtitle {
             color: var(--text-dim);
-            font-size: 0.95em;
+            font-size: 0.8em;
             font-weight: 300;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
         }
         
+        /* Conversation container */
+        #conversation {
+            display: block;
+        }
+        
+        /* Message base - tight padding, no rounded corners */
         .message { 
-            margin-bottom: 30px; 
-            padding: 24px;
-            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
             background: var(--bg-message);
-            border: 1px solid var(--border-glow);
-            position: relative;
-            transition: all 0.2s ease;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--ai-1);
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            word-break: break-word;
         }
         
-        .message:hover {
-            border-color: rgba(0, 255, 208, 0.2);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        /* Human user messages - left aligned like everything else */
+        .message.user {
+            border-left-color: var(--human);
+        }
+        
+        /* Assistant messages - AI-specific border colors */
+        .message.assistant {
+            border-left-color: var(--ai-1);
+        }
+        .message.assistant.ai-1-msg { border-left-color: var(--ai-1); }
+        .message.assistant.ai-2-msg { border-left-color: var(--ai-2); }
+        .message.assistant.ai-3-msg { border-left-color: var(--ai-3); }
+        .message.assistant.ai-4-msg { border-left-color: var(--ai-4); }
+        .message.assistant.ai-5-msg { border-left-color: var(--ai-5); }
+        
+        /* Generated image messages - use AI color, not pink */
+        .message.generated-image {
+            border-left-color: var(--ai-1);
+        }
+        .message.generated-image.ai-1-msg { border-left-color: var(--ai-1); }
+        .message.generated-image.ai-2-msg { border-left-color: var(--ai-2); }
+        .message.generated-image.ai-3-msg { border-left-color: var(--ai-3); }
+        .message.generated-image.ai-4-msg { border-left-color: var(--ai-4); }
+        .message.generated-image.ai-5-msg { border-left-color: var(--ai-5); }
+        
+        /* System messages */
+        .message.system {
+            border-left-color: var(--accent-yellow);
+            background: rgba(251, 191, 36, 0.04);
+            font-style: italic;
+        }
+        
+        /* Agent notifications */
+        .message.agent-notification {
+            border-left-color: var(--accent-green);
+            background: rgba(16, 185, 129, 0.06);
+            font-size: 0.9em;
         }
         
         .message-content {
             width: 100%;
         }
         
-        .message-image {
-            width: 100%;
-            margin-top: 20px;
-        }
-        
-        .message-image img {
-            width: 100%;
-            border-radius: 12px;
-            border: 1px solid var(--border-glow);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-        
-        .generated-image-container {
-            background: linear-gradient(135deg, rgba(179, 136, 255, 0.08) 0%, rgba(255, 64, 129, 0.08) 100%);
-            border: 1px solid rgba(179, 136, 255, 0.3);
-            border-radius: 16px;
-            padding: 20px;
-            margin: 20px 0;
-            text-align: center;
-        }
-        
-        .generated-image-container img {
-            width: 100%;
-            max-width: 100%;
-            border-radius: 12px;
-            margin-top: 12px;
-        }
-        
-        .generated-image-label {
-            color: var(--accent-purple);
-            font-size: 0.9em;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        
-        .generated-image-prompt {
-            color: var(--text-dim);
-            font-size: 0.85em;
-            font-style: italic;
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px solid rgba(179, 136, 255, 0.2);
-        }
-        
-        .user {
-            border-left: 3px solid var(--accent-cyan);
-        }
-        
-        .assistant {
-            border-left: 3px solid var(--accent-purple);
-        }
-        
-        .system {
-            background: rgba(255, 171, 64, 0.05);
-            border-left: 3px solid var(--accent-orange);
-            font-style: italic;
-        }
-        
-        .agent-notification {
-            background: linear-gradient(135deg, rgba(0, 255, 208, 0.08) 0%, rgba(79, 195, 247, 0.08) 100%);
-            border: 1px solid rgba(0, 255, 208, 0.2);
-            border-left: 3px solid var(--accent-cyan);
-            padding: 16px 20px;
-            margin: 16px 0;
-            font-size: 0.9em;
-            border-radius: 8px;
-        }
-        
+        /* Header - compact */
         .header { 
             font-weight: 500;
-            margin-bottom: 16px; 
+            margin-bottom: 6px; 
             display: flex;
             align-items: center;
-            justify-content: space-between;
             flex-wrap: wrap;
             gap: 8px;
+            font-size: 0.85em;
         }
         
         .ai-name {
-            color: var(--accent-purple);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.95em;
+            font-weight: 600;
         }
+        
+        /* AI-specific name colors */
+        .ai-name.ai-1 { color: var(--ai-1); }
+        .ai-name.ai-2 { color: var(--ai-2); }
+        .ai-name.ai-3 { color: var(--ai-3); }
+        .ai-name.ai-4 { color: var(--ai-4); }
+        .ai-name.ai-5 { color: var(--ai-5); }
+        .ai-name.human { color: var(--human); }
+        .ai-name.system { color: var(--accent-yellow); }
         
         .model-name {
             color: var(--text-dim);
-            font-size: 0.85em;
-            font-weight: 400;
-        }
-        
-        .user .ai-name {
-            color: var(--accent-cyan);
+            font-size: 0.9em;
         }
         
         .timestamp {
-            font-size: 0.75em;
+            font-size: 0.8em;
             color: var(--text-dim);
-            font-weight: 300;
+            margin-left: auto;
         }
         
+        /* Content */
         .content {
             white-space: pre-wrap;
             font-size: 0.95em;
-            line-height: 1.8;
+            line-height: 1.6;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            word-break: break-word;
         }
         
         .greentext {
             color: #789922;
-            font-family: 'JetBrains Mono', monospace;
         }
         
-        p { margin: 0.6em 0; }
-        
+        /* Code - sharp edges */
         code { 
-            background: rgba(0, 255, 208, 0.1);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-family: 'JetBrains Mono', monospace;
+            background: #0F1419;
+            padding: 1px 5px;
             font-size: 0.9em;
             color: var(--accent-cyan);
+            border: 1px solid var(--border);
         }
         
         pre { 
-            background: var(--bg-dark);
-            padding: 20px;
-            border-radius: 8px;
+            background: #0F1419;
+            padding: 12px 14px;
             overflow-x: auto;
-            font-family: 'JetBrains Mono', monospace;
             font-size: 0.85em;
-            margin: 20px 0;
-            border: 1px solid var(--border-glow);
-            color: var(--text-primary);
+            margin: 12px 0 12px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-bright);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.5;
         }
         
+        .code-header {
+            background: #1A1F26;
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--border);
+            border-radius: 4px 4px 0 0;
+            margin: -12px -14px 12px -14px;
+        }
+        
+        .code-lang {
+            color: var(--text-dim);
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Syntax highlighting */
+        .syn-keyword { color: #A78BFA; font-weight: bold; }
+        .syn-string { color: #5DFF44; }
+        .syn-number { color: #22D3EE; }
+        .syn-comment { color: #64748B; font-style: italic; }
+        .syn-function { color: #FBBF24; }
+        
+        /* Images */
+        .message-image {
+            margin-top: 10px;
+        }
+        
+        .message-image img {
+            max-width: 100%;
+            border: 1px solid var(--border);
+        }
+        
+        .image-credit {
+            color: var(--text-dim);
+            font-size: 0.75em;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        
+        /* Footer */
         footer {
-            margin-top: 60px;
+            margin-top: 40px;
             text-align: center;
-            padding: 30px 20px;
-            border-top: 1px solid var(--border-glow);
+            padding: 20px 16px;
+            border-top: 1px solid var(--border);
         }
         
         footer p {
             color: var(--text-dim);
-            font-size: 0.85em;
+            font-size: 0.8em;
             letter-spacing: 1px;
         }
         
@@ -2459,8 +3114,8 @@ class ConversationManager:
         /* Share button */
         .share-bar {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            top: 16px;
+            right: 16px;
             z-index: 1000;
         }
         
@@ -2468,36 +3123,53 @@ class ConversationManager:
             background: var(--bg-panel);
             border: 1px solid var(--accent-cyan);
             color: var(--accent-cyan);
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 8px 16px;
             cursor: pointer;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.85em;
+            font-size: 0.8em;
             transition: all 0.2s ease;
         }
         
         .share-btn:hover {
-            background: rgba(0, 255, 208, 0.1);
-            box-shadow: 0 0 20px rgba(0, 255, 208, 0.2);
+            background: rgba(6, 182, 212, 0.15);
+            box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
         }
         
-        @media (max-width: 600px) {
-            .container { padding: 20px 12px; }
-            h1 { font-size: 1.5em; }
-            .message { padding: 16px; }
-            .header { flex-direction: column; align-items: flex-start; }
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { padding: 16px 12px; }
+            h1 { font-size: 1.1em; letter-spacing: 2px; }
+            header { padding: 16px 12px; margin-bottom: 24px; }
+            .message { padding: 8px 12px; }
+            .header { flex-direction: column; align-items: flex-start; gap: 2px; }
+            .timestamp { margin-left: 0; }
+            .share-btn { padding: 6px 12px; font-size: 0.75em; }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 12px 8px; }
+            h1 { font-size: 1em; }
+            .message { padding: 8px 10px; }
+            .content { font-size: 0.9em; }
+            pre { padding: 10px 12px; font-size: 0.8em; }
+        }
+        
+        @media print {
+            body { background: white; color: black; }
+            .message { background: #f5f5f5; border: 1px solid #ddd; }
+            .share-bar { display: none; }
         }
     </style>
 </head>
 <body>
     <div class="share-bar">
-        <button class="share-btn" onclick="copyPageUrl()">📋 Copy Link</button>
+        <button class="share-btn" onclick="copyPageUrl()">📋 COPY LINK</button>
     </div>
     
     <div class="container">
         <header>
-            <h1>⟨ Liminal Backrooms ⟩</h1>
-            <p class="subtitle">AI Conversation Archive</p>
+            <h1>⟨ LIMINAL BACKROOMS ⟩</h1>
+            <p class="subtitle">Conversation Archive</p>
         </header>
         
         <div id="conversation">"""
@@ -2508,18 +3180,25 @@ class ConversationManager:
                 content = msg.get("content", "")
                 ai_name = msg.get("ai_name", "")
                 model = msg.get("model", "")
-                timestamp = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+                msg_type = msg.get("_type", "")
+                image_model = msg.get("image_model", "")
+                timestamp = datetime.now().strftime("%b %d, %Y %I:%M %p")
                 
                 # Skip special system messages or empty messages
-                if role == "system" and msg.get("_type") == "branch_indicator":
+                if role == "system" and msg_type == "branch_indicator":
                     continue
+                
+                # Skip most notifications in HTML output - only keep !add_ai ones
+                if msg_type == "agent_notification":
+                    content_str = content if isinstance(content, str) else ""
+                    if "!add_ai" not in content_str:
+                        continue
                 
                 # Check if content is empty (handle both string and list)
                 is_empty = False
                 if isinstance(content, str):
                     is_empty = not content.strip()
                 elif isinstance(content, list):
-                    # For structured content, check if all text parts are empty
                     text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
                     is_empty = not any(text_parts) and not any(part.get('type') == 'image' for part in content)
                 else:
@@ -2538,27 +3217,25 @@ class ConversationManager:
                 
                 # Process content to properly format code blocks and add greentext styling
                 processed_content = self.app.left_pane.process_content_with_code_blocks(text_content) if text_content else ""
-                
-                # Apply greentext styling to lines starting with '>'
                 processed_content = self.apply_greentext_styling(processed_content)
                 
                 # Message class based on role and type
                 message_class = role
-                if msg.get("_type") == "agent_notification":
+                if msg_type == "agent_notification":
                     message_class = "agent-notification"
+                elif msg_type == "generated_image":
+                    message_class = "generated-image"
                 
                 # Check if this message has an associated image
                 has_image = False
                 image_path = None
                 image_base64 = None
                 
-                # Check for generated image path
                 if hasattr(msg, "get") and callable(msg.get):
                     image_path = msg.get("generated_image_path", None)
                     if image_path:
                         has_image = True
                 
-                # Check for uploaded image in structured content
                 if isinstance(content, list):
                     for part in content:
                         if part.get('type') == 'image':
@@ -2568,40 +3245,70 @@ class ConversationManager:
                                 has_image = True
                                 break
                 
-                # Start message div
-                html_content += f'\n        <div class="message {message_class}">'
+                # Helper to get AI number from ai_name
+                def get_ai_num(name):
+                    if name and '-' in name:
+                        try:
+                            return max(1, min(5, int(name.split('-')[1])))
+                        except (ValueError, IndexError):
+                            pass
+                    return 1
                 
-                # Open content div
+                ai_num = get_ai_num(ai_name)
+                
+                # Build message class with AI-specific border styling
+                # Apply to assistant and generated-image messages
+                ai_msg_class = f"ai-{ai_num}-msg" if role == "assistant" or msg_type == "generated_image" else ""
+                full_message_class = f"{message_class} {ai_msg_class}".strip()
+                
+                # Start message div
+                html_content += f'\n        <div class="message {full_message_class}">'
                 html_content += f'\n            <div class="message-content">'
                 
-                # Add header for assistant messages
-                if role == "assistant":
-                    html_content += f'\n                <div class="header"><span class="ai-name">{ai_name}</span>'
+                # Add header based on role
+                if role == "assistant" or msg_type == "generated_image":
+                    display_name = ai_name if ai_name else "AI"
+                    color_class = f"ai-{ai_num}"
+                    html_content += f'\n                <div class="header"><span class="ai-name {color_class}">{display_name}</span>'
                     if model:
                         html_content += f' <span class="model-name">({model})</span>'
                     html_content += f' <span class="timestamp">{timestamp}</span></div>'
                 elif role == "user":
-                    html_content += f'\n                <div class="header"><span class="ai-name">User</span> <span class="timestamp">{timestamp}</span></div>'
+                    if msg_type == "generated_image" or (has_image and ai_name):
+                        display_name = ai_name if ai_name else "AI"
+                        color_class = f"ai-{ai_num}"
+                        html_content += f'\n                <div class="header"><span class="ai-name {color_class}">{display_name}</span>'
+                        if model:
+                            html_content += f' <span class="model-name">({model})</span>'
+                        html_content += f' <span class="timestamp">{timestamp}</span></div>'
+                    else:
+                        html_content += f'\n                <div class="header"><span class="ai-name human">Human User</span> <span class="timestamp">{timestamp}</span></div>'
+                elif role == "system" and msg_type != "agent_notification":
+                    html_content += f'\n                <div class="header"><span class="ai-name system">System</span> <span class="timestamp">{timestamp}</span></div>'
                 
                 # Add message content
-                html_content += f'\n                <div class="content">{processed_content}</div>'
+                if processed_content and processed_content.strip():
+                    html_content += f'\n                <div class="content">{processed_content}</div>'
                 
-                # Close content div
                 html_content += '\n            </div>'
                 
-                # Add image if present - full width
+                # Add image if present
                 if has_image:
                     html_content += f'\n            <div class="message-image">'
                     if image_base64:
-                        # Use base64 data directly
                         html_content += f'\n                <img src="data:image/jpeg;base64,{image_base64}" alt="Generated image" loading="lazy" />'
                     elif image_path:
-                        # Convert Windows path format to web format if needed
                         web_path = image_path.replace('\\', '/')
                         html_content += f'\n                <img src="{web_path}" alt="Generated image" loading="lazy" />'
+                    if ai_name and (msg_type == "generated_image" or role != "user"):
+                        if image_model:
+                            # Format model name nicely (remove provider prefix)
+                            model_display = image_model.split("/")[-1] if "/" in image_model else image_model
+                            html_content += f'\n                <div class="image-credit">Generated by {ai_name} using {model_display}</div>'
+                        else:
+                            html_content += f'\n                <div class="image-credit">Generated by {ai_name}</div>'
                     html_content += f'\n            </div>'
                 
-                # Close message div
                 html_content += '\n        </div>'
             
             # Close HTML document
@@ -2609,7 +3316,7 @@ class ConversationManager:
         </div>
         
         <footer>
-            <p>Generated by <a href="#">Liminal Backrooms</a></p>
+            <p>Generated by <a href="https://github.com/liminalbardo/liminal_backrooms" target="_blank">Liminal Backrooms</a></p>
         </footer>
     </div>
     
@@ -2618,10 +3325,9 @@ class ConversationManager:
             const url = window.location.href;
             navigator.clipboard.writeText(url).then(() => {
                 const btn = document.querySelector('.share-btn');
-                btn.textContent = '✓ Copied!';
-                setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000);
+                btn.textContent = '✓ COPIED';
+                setTimeout(() => { btn.textContent = '📋 COPY LINK'; }, 2000);
             }).catch(() => {
-                // Fallback for file:// URLs
                 const text = document.documentElement.outerHTML;
                 const blob = new Blob([text], {type: 'text/html'});
                 const url = URL.createObjectURL(blob);
@@ -2630,8 +3336,8 @@ class ConversationManager:
                 a.download = 'conversation.html';
                 a.click();
                 const btn = document.querySelector('.share-btn');
-                btn.textContent = '✓ Downloaded!';
-                setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000);
+                btn.textContent = '✓ SAVED';
+                setTimeout(() => { btn.textContent = '📋 COPY LINK'; }, 2000);
             });
         }
     </script>
@@ -2645,7 +3351,10 @@ class ConversationManager:
             print(f"Updated full conversation HTML document: {html_file}")
             return True
         except Exception as e:
-            print(f"Error updating conversation HTML: {e}")
+            import traceback
+            print(f"[ERROR] Error updating conversation HTML: {e}")
+            print(f"[ERROR] Traceback:")
+            traceback.print_exc()
             return False
 
     def apply_greentext_styling(self, html_content):
@@ -2717,6 +3426,41 @@ def create_gui():
     """Create the GUI application"""
     app = QApplication(sys.argv)
     
+    # Platform-specific setup for taskbar/dock icon
+    if sys.platform == 'win32':
+        # Windows: Set App User Model ID so taskbar shows our icon, not Python's
+        import ctypes
+        app_id = 'liminal.backrooms.app.1'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    elif sys.platform == 'darwin':
+        # macOS: Ensure app doesn't appear as a Python process
+        # The .ico works but .icns is preferred for Mac - Qt handles both
+        app.setApplicationName("Liminal Backrooms")
+    
+    # Set application icon (shows in taskbar/dock and window title)
+    from PyQt6.QtGui import QIcon
+    assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    
+    # Try platform-preferred format first, fall back to .ico
+    icon_path = None
+    if sys.platform == 'darwin':
+        # macOS prefers .icns
+        icns_path = os.path.join(assets_dir, "app-icon.icns")
+        if os.path.exists(icns_path):
+            icon_path = icns_path
+    
+    if icon_path is None:
+        # .ico works on all platforms (Windows, Linux, macOS)
+        icon_path = os.path.join(assets_dir, "app-icon.ico")
+    
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        # Linux: Set desktop entry name for proper taskbar grouping
+        if sys.platform.startswith('linux'):
+            app.setDesktopFileName("liminal-backrooms")
+    else:
+        print(f"Note: No app icon found at {icon_path}")
+    
     # Load custom fonts (Iosevka Term for better ASCII art rendering)
     loaded_fonts = load_fonts()
     if loaded_fonts:
@@ -2726,15 +3470,64 @@ def create_gui():
     
     main_window = LiminalBackroomsApp()
     
-    # Create conversation manager and store it on the app for access in ai_turn
+    # Create conversation manager
     manager = ConversationManager(main_window)
-    main_window.conversation_manager = manager  # Store reference on app for prompt additions
     manager.initialize()
+    
+    # Initialize debug tools if DEVELOPER_TOOLS is enabled
+    debug_manager = None
+    if DEVELOPER_TOOLS:
+        try:
+            from tools.debug_tools import DebugManager
+            debug_manager = DebugManager(main_window)
+            # Store reference on window to prevent garbage collection
+            main_window._debug_manager = debug_manager
+        except ImportError as e:
+            print(f"Warning: Could not load debug tools: {e}")
     
     return main_window, app
 
 def run_gui(main_window, app):
     """Run the GUI application"""
+    # Set up global exception handler for crash logging
+    def global_exception_handler(exc_type, exc_value, exc_traceback):
+        import traceback
+        print("\n" + "=" * 60)
+        print("[CRASH] Unhandled exception caught!")
+        print("=" * 60)
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        print("=" * 60 + "\n")
+        
+        # Also write to crash log file
+        try:
+            from datetime import datetime
+            crash_log = os.path.join(LOGS_DIR, "crash_log.txt")
+            with open(crash_log, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'=' * 60}\n")
+                f.write(f"[CRASH] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+                f.write(f"{'=' * 60}\n")
+            print(f"[CRASH] Details logged to: {crash_log}")
+        except:
+            pass
+        
+        # Call the default handler
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    
+    sys.excepthook = global_exception_handler
+    
+    # Initialize freeze detector for debugging (catches UI freezes)
+    freeze_detector = None
+    if _FREEZE_DETECTOR_AVAILABLE:
+        try:
+            freeze_log = os.path.join(LOGS_DIR, "freeze_log.txt")
+            crash_log = os.path.join(LOGS_DIR, "crash_log.txt")
+            enable_faulthandler(crash_log)  # Enables segfault logging to logs folder
+            freeze_detector = FreezeDetector(timeout_seconds=5, log_file=freeze_log)
+            freeze_detector.start()
+        except Exception as e:
+            print(f"Warning: Could not start freeze detector: {e}")
+    
     main_window.show()
     sys.exit(app.exec())
 

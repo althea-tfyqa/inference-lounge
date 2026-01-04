@@ -1,4 +1,9 @@
-# new_gui.py
+# gui.py
+"""
+Main GUI module for Liminal Backrooms application.
+
+All styling is imported from styles.py - the single source of truth for colors/fonts.
+"""
 
 import os
 import json
@@ -17,6 +22,7 @@ import networkx as nx
 import re
 import sys
 import webbrowser
+import subprocess
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
@@ -25,53 +31,886 @@ from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBox
 from config import (
     AI_MODELS,
     SYSTEM_PROMPT_PAIRS,
-    SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT
+    SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
+    OUTPUTS_DIR,
+    DEVELOPER_TOOLS
 )
 
-# Add import for the HTML viewing functionality 
-from shared_utils import open_html_in_browser, generate_image_from_text
+# Import centralized styling - single source of truth for colors and widget styles
+from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
 
-# Define global color palette for consistent styling - Cyberpunk theme
-COLORS = {
-    # Backgrounds - darker, moodier
-    'bg_dark': '#0A0E1A',           # Deep blue-black
-    'bg_medium': '#111827',         # Slate dark
-    'bg_light': '#1E293B',          # Lighter slate
+# Import shared utilities - with fallback for open_html_in_browser
+from shared_utils import generate_image_from_text
+try:
+    from shared_utils import open_html_in_browser
+except ImportError:
+    open_html_in_browser = None
+
+# Add import for grouped model selector functionality
+from grouped_model_selector import GroupedModelComboBox
+
+
+# =============================================================================
+# MESSAGE WIDGET CHAT SYSTEM - Each message is a separate widget
+# =============================================================================
+# This solves scroll jumping because adding/updating messages doesn't destroy
+# existing widgets. QScrollArea naturally preserves scroll position.
+# =============================================================================
+
+class MessageWidget(QFrame):
+    """
+    A single message in the chat - renders as a styled frame with content.
     
-    # Primary accents - neon but muted
-    'accent_cyan': '#06B6D4',       # Cyan (primary)
-    'accent_cyan_hover': '#0891B2',
-    'accent_cyan_active': '#0E7490',
+    Styling rules:
+    - No rounded corners (retro CRT theme)
+    - bg_medium background on message blocks
+    - Transparent backgrounds on text labels (no black text boxes)
+    - Left-aligned borders for all messages (including human)
+    - AI colors applied per AI number
+    """
     
-    # Secondary accents
-    'accent_pink': '#EC4899',       # Hot pink (secondary)
-    'accent_purple': '#A855F7',     # Purple (tertiary)
-    'accent_yellow': '#FBBF24',     # Amber for warnings
-    'accent_green': '#10B981',      # Emerald (rabbithole)
+    # AI color mapping - matches styles.py COLORS
+    AI_COLORS = {
+        1: '#6FFFE6',  # Bright Aqua
+        2: '#06E2D4',  # Teal
+        3: '#54F5E9',  # Turquoise
+        4: '#8BFCEF',  # Light Cyan
+        5: '#91FCFD',  # Pale Cyan
+    }
+    HUMAN_COLOR = '#ff00b3'  # Hot Pink/Magenta
+    TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
     
-    # Text colors
-    'text_normal': '#CBD5E1',       # Slate-200
-    'text_dim': '#64748B',          # Slate-500
-    'text_bright': '#F1F5F9',       # Slate-50
-    'text_glow': '#38BDF8',         # Sky-400 (glowing text)
-    'text_error': '#EF4444',        # Red-500
+    def __init__(self, message_data, parent=None):
+        super().__init__(parent)
+        self.message_data = message_data
+        self._content_label = None  # Reference to content label for updates
+        self._setup_ui()
     
-    # Borders and effects
-    'border': '#1E293B',            # Slate-800
-    'border_glow': '#06B6D4',       # Glowing cyan borders
-    'border_highlight': '#334155',  # Slate-700
-    'shadow': 'rgba(6, 182, 212, 0.2)',  # Cyan glow shadows
+    def _setup_ui(self):
+        """Build the widget UI based on message data."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        role = self.message_data.get('role', 'user')
+        content = self.message_data.get('content', '')
+        msg_type = self.message_data.get('_type', '')
+        
+        # Extract text from structured content
+        text_content = self._extract_text(content)
+        
+        # Style based on role/type
+        if msg_type == 'typing_indicator':
+            self._setup_typing_indicator()
+        elif msg_type == 'branch_indicator':
+            self._setup_branch_indicator(text_content)
+        elif msg_type == 'agent_notification':
+            self._setup_notification(text_content)
+        elif msg_type == 'generated_image':
+            self._setup_generated_image()
+        elif msg_type == 'generated_video':
+            self._setup_generated_video()
+        elif role == 'user':
+            self._setup_user_message(text_content)
+        elif role == 'assistant':
+            self._setup_assistant_message(text_content)
+        elif role == 'system':
+            self._setup_system_message(text_content)
+        else:
+            self._setup_default_message(text_content)
     
-    # Legacy color mappings for compatibility
-    'accent_blue': '#06B6D4',       # Map old blue to cyan
-    'accent_blue_hover': '#0891B2',
-    'accent_blue_active': '#0E7490',
-    'accent_orange': '#F59E0B',     # Amber-500
-    'chain_of_thought': '#10B981',  # Emerald
-    'user_header': '#06B6D4',       # Cyan
-    'ai_header': '#A855F7',         # Purple
-    'system_message': '#F59E0B',    # Amber
-}
+    def _extract_text(self, content):
+        """Extract text from content (handles structured content with images)."""
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'text':
+                    text_parts.append(part.get('text', ''))
+            return ''.join(text_parts)
+        return str(content) if content else ''
+    
+    def _format_code_blocks(self, text):
+        """
+        Convert markdown code blocks and inline code to HTML for Qt RichText.
+        
+        Uses table-based HTML structure that Qt renders properly.
+        """
+        import re
+        import html
+        
+        # Split by code blocks first (```...```)
+        code_block_pattern = r'```(\w*)\n?(.*?)```'
+        
+        parts = []
+        last_end = 0
+        
+        for match in re.finditer(code_block_pattern, text, re.DOTALL):
+            # Text before this code block
+            before_text = text[last_end:match.start()]
+            parts.append(('text', before_text))
+            
+            # The code block
+            lang = match.group(1) or ''
+            code = match.group(2)
+            parts.append(('code_block', code, lang))
+            
+            last_end = match.end()
+        
+        # Remaining text
+        if last_end < len(text):
+            parts.append(('text', text[last_end:]))
+        
+        # Process each part
+        result = []
+        
+        # Colors for code blocks
+        code_bg = '#0F1419'
+        header_bg = '#1A1F26'
+        border_color = COLORS.get('border', '#2D3748')
+        code_text_color = '#E2E8F0'
+        
+        for part in parts:
+            if part[0] == 'code_block':
+                code = html.escape(part[1].rstrip())
+                lang = part[2].lower()
+                
+                # Language header row
+                lang_row = ''
+                if lang:
+                    lang_row = (
+                        f'<tr><td style="background-color: {header_bg}; '
+                        f'padding: 4px 10px; border-bottom: 1px solid {border_color};">'
+                        f'<span style="color: {COLORS["text_dim"]}; font-size: 9pt; '
+                        f'font-family: Consolas, Monaco, monospace; font-weight: bold;">'
+                        f'{lang.upper()}</span></td></tr>'
+                    )
+                
+                # Code block with subtle border
+                result.append(
+                    f'<table cellspacing="0" cellpadding="0" '
+                    f'style="margin: 8px 0 8px 10px; border: 1px solid {border_color};">'
+                    f'<tr><td style="background-color: {code_bg}; padding: 0;">'
+                    f'<table cellspacing="0" cellpadding="0" width="100%">'
+                    f'{lang_row}'
+                    f'<tr><td style="background-color: {code_bg}; padding: 10px 12px;">'
+                    f'<pre style="margin: 0; font-family: Consolas, Monaco, monospace; '
+                    f'font-size: 9pt; white-space: pre-wrap; color: {code_text_color};">{code}</pre>'
+                    f'</td></tr></table></td></tr></table>'
+                )
+            else:
+                # Regular text - escape and process inline code
+                text_part = html.escape(part[1])
+                
+                # Replace inline code `...` with styled spans
+                inline_pattern = r'`([^`]+)`'
+                text_part = re.sub(
+                    inline_pattern,
+                    f'<span style="background-color: {code_bg}; color: {COLORS["accent_cyan"]}; '
+                    f'border: 1px solid {border_color}; '
+                    f'padding: 1px 4px; font-family: Consolas, Monaco, monospace; font-size: 9pt;">'
+                    f'\\1</span>',
+                    text_part
+                )
+                
+                # Convert newlines to <br>
+                text_part = text_part.replace('\n', '<br/>')
+                
+                result.append(text_part)
+        
+        return ''.join(result)
+    
+    def _create_header_widget(self, name_text, color):
+        """Create a header widget with name (no timestamp)."""
+        header_widget = QWidget()
+        header_widget.setStyleSheet("background-color: transparent;")
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+        
+        # Name label (left)
+        name_label = QLabel(name_text)
+        name_label.setStyleSheet(f"background-color: transparent; color: {color}; font-weight: bold; font-size: 9pt;")
+        header_layout.addWidget(name_label)
+        
+        return header_widget
+    
+    def _get_ai_color(self):
+        """Get the color for this AI based on _ai_number or extracted from ai_name."""
+        ai_num = self.message_data.get('_ai_number')
+        
+        # If no _ai_number, try to extract from ai_name (e.g., "AI-1", "AI-2")
+        if ai_num is None:
+            ai_name = self.message_data.get('ai_name', '')
+            if ai_name:
+                import re
+                match = re.search(r'AI-?(\d+)', ai_name, re.IGNORECASE)
+                if match:
+                    ai_num = int(match.group(1))
+        
+        # Default to 1 if still not found
+        if ai_num is None:
+            ai_num = 1
+            
+        return self.AI_COLORS.get(ai_num, self.AI_COLORS[1])
+    
+    def _setup_typing_indicator(self):
+        """Setup typing indicator style."""
+        ai_name = self.message_data.get('ai_name', 'AI')
+        model = self.message_data.get('model', '')
+        border_color = self._get_ai_color()
+        display_name = f"{ai_name} ({model})" if model else ai_name
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {border_color};
+                border-radius: 0px;
+            }}
+        """)
+        
+        header = self._create_header_widget(display_name, border_color)
+        self.layout().addWidget(header)
+        
+        dots = QLabel("thinking...")
+        dots.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-style: italic;")
+        self.layout().addWidget(dots)
+    
+    def _setup_branch_indicator(self, text):
+        """Setup branch indicator style."""
+        if "Rabbitholing" in text:
+            color = COLORS.get('accent_magenta', '#ff00ff')
+        else:
+            color = COLORS.get('accent_cyan', '#00ffff')
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: transparent;
+                border: 1px dashed {color};
+                border-radius: 0px;
+                padding: 4px;
+            }}
+        """)
+        
+        label = QLabel(text)
+        label.setStyleSheet(f"background-color: transparent; color: {color}; font-size: 9pt;")
+        label.setWordWrap(True)
+        self.layout().addWidget(label)
+    
+    def _setup_notification(self, text):
+        """Setup agent notification style with color-matching backgrounds."""
+        command_success = self.message_data.get('_command_success')
+        if command_success is False:
+            bg_color = "#2a1a1a"  # Dark red tint
+            border_color = "#ff4444"  # Bright red (distinct from human pink)
+        elif command_success is True:
+            bg_color = "#1a2a1a"  # Dark green tint
+            border_color = COLORS.get('notify_success', '#5DFF44')
+        else:
+            bg_color = "#2a2a1a"  # Dark yellow tint
+            border_color = COLORS.get('notify_info', '#FFFF48')
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {bg_color};
+                border-left: 3px solid {border_color};
+                border-radius: 0px;
+            }}
+        """)
+        
+        label = QLabel(text)
+        label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']}; font-size: 9pt;")
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        self.layout().addWidget(label)
+    
+    def _setup_generated_image(self):
+        """Setup generated image display with AI-matching colors."""
+        ai_name = self.message_data.get('ai_name', 'AI')
+        model = self.message_data.get('model', '')
+        # Try multiple field names for image model
+        image_model = (self.message_data.get('_image_model') or 
+                       self.message_data.get('image_model') or 
+                       'image model')
+        image_path = self.message_data.get('generated_image_path', '')
+        
+        # Try multiple field names for prompt, including extracting from content
+        image_prompt = (self.message_data.get('_prompt') or 
+                        self.message_data.get('image_prompt') or '')
+        
+        # If no prompt found, try extracting from content (e.g., !image "prompt here")
+        if not image_prompt:
+            content = self.message_data.get('content', '')
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get('type') == 'text':
+                        text = part.get('text', '')
+                        import re
+                        match = re.search(r'!image\s+"([^"]+)"', text)
+                        if match:
+                            image_prompt = match.group(1)
+                            break
+            elif isinstance(content, str) and '!image' in content:
+                import re
+                match = re.search(r'!image\s+"([^"]+)"', content)
+                if match:
+                    image_prompt = match.group(1)
+        
+        border_color = self._get_ai_color()
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {border_color};
+                border-radius: 0px;
+            }}
+        """)
+        
+        # Header: "AI-X (model) generated an image using <image_model>"
+        display_name = f"{ai_name} ({model})" if model else ai_name
+        header_text = f"{display_name} generated an image using {image_model}"
+        header = self._create_header_widget(header_text, border_color)
+        self.layout().addWidget(header)
+        
+        # Show prompt if available
+        if image_prompt:
+            prompt_label = QLabel(f"Prompt: {image_prompt}")
+            prompt_label.setStyleSheet(f"background-color: transparent; color: {self.TIMESTAMP_COLOR}; font-size: 9pt; font-style: italic;")
+            prompt_label.setWordWrap(True)
+            self.layout().addWidget(prompt_label)
+        
+        # Display image
+        if image_path and os.path.exists(image_path):
+            img_label = QLabel()
+            img_label.setStyleSheet("background-color: transparent;")
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                scaled = pixmap.scaledToWidth(400, Qt.TransformationMode.SmoothTransformation)
+                img_label.setPixmap(scaled)
+                self.layout().addWidget(img_label)
+    
+    def _setup_generated_video(self):
+        """Setup generated video display with AI-matching colors."""
+        ai_name = self.message_data.get('ai_name', 'AI')
+        model = self.message_data.get('model', '')
+        video_model = self.message_data.get('video_model', 'unknown model')
+        video_path = self.message_data.get('generated_video_path', '')
+        video_prompt = self.message_data.get('video_prompt', '')
+        border_color = self._get_ai_color()
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {border_color};
+                border-radius: 0px;
+            }}
+        """)
+        
+        # Header: "AI-X (model) generated a video using <video_model>"
+        display_name = f"{ai_name} ({model})" if model else ai_name
+        header_text = f"{display_name} generated a video using {video_model}"
+        header = self._create_header_widget(header_text, border_color)
+        self.layout().addWidget(header)
+        
+        # Show prompt if available
+        if video_prompt:
+            prompt_label = QLabel(f"Prompt: {video_prompt}")
+            prompt_label.setStyleSheet(f"background-color: transparent; color: {self.TIMESTAMP_COLOR}; font-size: 9pt; font-style: italic;")
+            prompt_label.setWordWrap(True)
+            self.layout().addWidget(prompt_label)
+        
+        # Display video path info
+        if video_path:
+            path_label = QLabel(f"Video: {os.path.basename(video_path)}")
+            path_label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']}; font-size: 9pt;")
+            self.layout().addWidget(path_label)
+    
+    def _setup_user_message(self, text):
+        """Setup human user message style - left-aligned like AI messages."""
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {self.HUMAN_COLOR};
+                border-radius: 0px;
+            }}
+        """)
+        
+        header = self._create_header_widget("Human User", self.HUMAN_COLOR)
+        self.layout().addWidget(header)
+        
+        # Format code blocks and use RichText
+        formatted_text = self._format_code_blocks(text)
+        content = QLabel(formatted_text)
+        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.TextFormat.RichText)
+        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.layout().addWidget(content)
+        self._content_label = content
+    
+    def _setup_assistant_message(self, text):
+        """Setup AI assistant message style."""
+        ai_name = self.message_data.get('ai_name', 'AI')
+        model = self.message_data.get('model', '')
+        border_color = self._get_ai_color()
+        
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {border_color};
+                border-radius: 0px;
+            }}
+        """)
+        
+        display_name = f"{ai_name} ({model})" if model else ai_name
+        header = self._create_header_widget(display_name, border_color)
+        self.layout().addWidget(header)
+        
+        # Format code blocks and use RichText
+        formatted_text = self._format_code_blocks(text)
+        content = QLabel(formatted_text)
+        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.TextFormat.RichText)
+        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.layout().addWidget(content)
+        self._content_label = content
+    
+    def _setup_system_message(self, text):
+        """Setup system message style."""
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-left: 3px solid {COLORS['text_dim']};
+                border-radius: 0px;
+            }}
+        """)
+        
+        # Format code blocks and use RichText
+        formatted_text = self._format_code_blocks(text)
+        content = QLabel(formatted_text)
+        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-style: italic;")
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.TextFormat.RichText)
+        self.layout().addWidget(content)
+        self._content_label = content
+    
+    def _setup_default_message(self, text):
+        """Default message style."""
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-radius: 0px;
+            }}
+        """)
+        
+        # Format code blocks and use RichText
+        formatted_text = self._format_code_blocks(text)
+        content = QLabel(formatted_text)
+        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.TextFormat.RichText)
+        self.layout().addWidget(content)
+        self._content_label = content
+    
+    def update_content(self, new_text):
+        """Update the content of this message (for streaming).
+        
+        For streaming, we use the simple HTML approach since widgets can't be
+        efficiently updated incrementally. Full code block widgets are used
+        for final rendered messages.
+        """
+        if self._content_label:
+            # Format code blocks for RichText display (HTML-based for streaming)
+            formatted_text = self._format_code_blocks(new_text)
+            self._content_label.setText(formatted_text)
+
+
+class ChatScrollArea(QScrollArea):
+    """
+    Scroll area for chat messages with smart auto-scroll behavior.
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    SCROLL SYSTEM ARCHITECTURE
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    This widget solves the "chat scroll problem": auto-scroll to bottom for new
+    messages, BUT respect when user scrolls up to read history.
+    
+    KEY CONCEPTS:
+    ─────────────
+    • _should_follow: True = auto-scroll to bottom on new content
+                      False = user scrolled away, DON'T auto-scroll
+    
+    • _programmatic_scroll: True = WE are scrolling (ignore in _on_scroll)
+                            False = User might be scrolling (track intent)
+    
+    • Debouncing: Multiple rapid add_message() calls → single scroll after 50ms
+    
+    STATE TRANSITIONS:
+    ──────────────────
+    User scrolls UP (away from bottom):
+        → _should_follow = False
+        → New messages appear but scroll stays put
+    
+    User scrolls DOWN to bottom:
+        → _should_follow = True  
+        → New messages trigger auto-scroll
+    
+    Rebuild (typing indicator → real message):
+        → Save _should_follow
+        → Block _on_scroll with _programmatic_scroll=True
+        → Rebuild widgets
+        → Restore _should_follow
+        → Only scroll if was following
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    DEBUG OUTPUT GUIDE
+    ═══════════════════════════════════════════════════════════════════════════
+
+    Enable debugging: Set config.DEVELOPER_TOOLS = True
+        - ChatScrollArea._debug (for [CHAT-SCROLL] messages)
+        - ConversationPane._SCROLL_DEBUG (for [SCROLL] messages)
+
+    Filter logs: grep "SCROLL" to see all scroll-related output
+    
+    ───────────────────────────────────────────────────────────────────────────
+    LOG MESSAGE REFERENCE
+    ───────────────────────────────────────────────────────────────────────────
+    
+    [CHAT-SCROLL] User scrolled UP → auto-follow OFF (pos=X/Y)
+        ✓ HEALTHY: User scrolled away from bottom to read history.
+        • X = current scroll position, Y = maximum scroll position
+        • _should_follow is now False
+        • New messages will NOT trigger auto-scroll
+    
+    [CHAT-SCROLL] User scrolled to BOTTOM → auto-follow ON (pos=X/Y)
+        ✓ HEALTHY: User returned to bottom of chat.
+        • _should_follow is now True  
+        • New messages WILL trigger auto-scroll
+    
+    [CHAT-SCROLL] Auto-scrolled to bottom (max=Z)
+        ✓ HEALTHY: Programmatic scroll executed successfully.
+        • Z = new maximum scroll position
+        • Only logs when position changes by >100px (reduces spam)
+    
+    [CHAT-SCROLL] ⚠ Scroll retry limit reached (layout still empty)
+        ⚠ WARNING: Tried to scroll 5 times but layout never became ready.
+        • Usually means widgets aren't being added properly
+        • Check if add_message() is being called
+    
+    [CHAT-SCROLL] Cleared N messages (scroll intent X: _should_follow=Y)
+        • N = number of messages removed
+        • X = "RESET to follow" or "preserved"
+        • If X="preserved" but Y changed unexpectedly, that's a BUG
+    
+    [SCROLL] Rebuild starting: N messages, _should_follow=X
+        • A full widget rebuild is starting (e.g., typing indicator → message)
+        • N = message count, X = scroll state being preserved
+    
+    [SCROLL] Rebuild complete: ACTION
+        • Rebuild finished
+        • ACTION = "will scroll" or "NO scroll (user scrolled away)"
+        • If user had scrolled away but ACTION="will scroll", that's a BUG
+    
+    ───────────────────────────────────────────────────────────────────────────
+    DEBUGGING COMMON ISSUES
+    ───────────────────────────────────────────────────────────────────────────
+    
+    SYMPTOM: Scroll jumps to bottom unexpectedly
+        1. Look for "User scrolled UP → auto-follow OFF" - did it fire?
+        2. After that, look for any "_should_follow=True" 
+        3. Check "Rebuild complete" - should say "NO scroll (user scrolled away)"
+        4. Look for "scroll intent RESET" - that resets to following mode!
+    
+    SYMPTOM: Scroll doesn't follow new messages  
+        1. Look for "User scrolled to BOTTOM" - is user actually at bottom?
+        2. Check for "Auto-scrolled to bottom" - is it firing?
+        3. If you see "⚠ Scroll retry limit reached", layout isn't becoming ready
+    
+    SYMPTOM: Too much log spam
+        1. Normal: One "Auto-scrolled" per significant scroll change
+        2. If seeing rapid repeated messages, debouncing may be broken
+        3. Check _scroll_timer.setInterval(50) is set
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # ─── Scroll State ───────────────────────────────────────────────────
+        self._should_follow = True    # True = auto-scroll to bottom on new content
+        self._programmatic_scroll = False  # True = ignore _on_scroll (we're scrolling)
+        
+        # ─── Debug Settings ─────────────────────────────────────────────────
+        # Set to True to enable scroll debug logging to console
+        # Logs use prefix [CHAT-SCROLL] for easy filtering: grep "CHAT-SCROLL"
+        self._debug = DEVELOPER_TOOLS
+        
+        # ─── Debounce Timer ─────────────────────────────────────────────────
+        # Batches rapid scroll requests (e.g., multiple add_message calls)
+        self._scroll_timer = QTimer()
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.setInterval(50)  # 50ms debounce window
+        self._scroll_timer.timeout.connect(self._do_scroll_to_bottom)
+        
+        # ─── Scroll Area Setup ──────────────────────────────────────────────
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # ─── Message Container ──────────────────────────────────────────────
+        # Messages are added to this container's layout
+        self.container = QWidget()
+        self.container.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        self.message_layout = QVBoxLayout(self.container)
+        self.message_layout.setContentsMargins(10, 10, 10, 10)
+        self.message_layout.setSpacing(8)
+        # Align to top - prevents layout from distributing extra space among widgets
+        self.message_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.setWidget(self.container)
+        
+        # ─── User Scroll Detection ──────────────────────────────────────────
+        # Connect AFTER setup so we don't get spurious signals during init
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        
+        # ─── Style ──────────────────────────────────────────────────────────
+        # Use standardized scrollbar style from styles.py
+        self.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+            }}
+            {get_scrollbar_style()}
+        """)
+        
+        # Message widgets list
+        self.message_widgets = []
+    
+    def _on_scroll(self, value):
+        """
+        Track user scroll intent based on scrollbar position.
+        
+        Called on every scrollbar valueChanged signal. Determines if user
+        has scrolled away from bottom (stop auto-follow) or back to bottom
+        (resume auto-follow).
+        
+        Ignored when:
+        - _programmatic_scroll is True (we're scrolling, not user)
+        - sb.maximum() is 0 (layout empty/rebuilding)
+        """
+        # Ignore our own programmatic scrolls
+        if self._programmatic_scroll:
+            return
+            
+        sb = self.verticalScrollBar()
+        # Ignore when layout is empty or rebuilding
+        if sb.maximum() == 0:
+            return
+        
+        # "At bottom" = within 30px of maximum scroll position
+        at_bottom = value >= sb.maximum() - 30
+        
+        # Only update and log on state CHANGES (reduces log spam)
+        if at_bottom != self._should_follow:
+            self._should_follow = at_bottom
+            if self._debug:
+                if at_bottom:
+                    print(f"[CHAT-SCROLL] User scrolled to BOTTOM → auto-follow ON (pos={value}/{sb.maximum()})")
+                else:
+                    print(f"[CHAT-SCROLL] User scrolled UP → auto-follow OFF (pos={value}/{sb.maximum()})")
+    
+    def add_message(self, message_data):
+        """
+        Add a new message widget to the chat.
+        
+        Appends widget to layout and schedules auto-scroll if:
+        - _should_follow is True (user wants to follow new messages)
+        - _programmatic_scroll is False (not in a rebuild operation)
+        
+        Returns the created MessageWidget for potential updates.
+        """
+        widget = MessageWidget(message_data)
+        
+        # Simply add to end of layout (no stretch item to work around)
+        self.message_layout.addWidget(widget)
+        self.message_widgets.append(widget)
+        
+        # Schedule debounced scroll (if following and not during programmatic operation)
+        if self._should_follow and not self._programmatic_scroll:
+            self._schedule_scroll()
+        
+        return widget
+    
+    def replace_last_message(self, message_data):
+        """
+        Replace the last message widget with a new one.
+        
+        Used for smooth transition from typing indicator to real message
+        without rebuilding the entire chat. Much faster and no visual flash.
+        """
+        if self.message_widgets:
+            # Remove old widget
+            old_widget = self.message_widgets.pop()
+            self.message_layout.removeWidget(old_widget)
+            old_widget.deleteLater()
+            
+            # Add new widget
+            widget = MessageWidget(message_data)
+            self.message_layout.addWidget(widget)
+            self.message_widgets.append(widget)
+            
+            # Schedule scroll if following
+            if self._should_follow and not self._programmatic_scroll:
+                self._schedule_scroll()
+            
+            return widget
+        else:
+            # No widget to replace, just add
+            return self.add_message(message_data)
+    
+    def _schedule_scroll(self):
+        """
+        Schedule a debounced scroll to bottom.
+        
+        Uses a 50ms timer to batch multiple rapid calls (e.g., during rebuild).
+        Each call restarts the timer, so scroll only happens after calls stop.
+        """
+        self._scroll_retries = 0  # Reset retry counter for _do_scroll_to_bottom
+        self._scroll_timer.start()  # Restart timer (debounces rapid calls)
+    
+    def _do_scroll_to_bottom(self):
+        """
+        Actually execute scroll to bottom (called by debounce timer).
+        
+        May retry up to 5 times if layout isn't ready (sb.maximum() == 0).
+        Sets _programmatic_scroll during scroll to prevent _on_scroll from
+        misinterpreting our scroll as user scroll.
+        """
+        if not self._should_follow:
+            return
+            
+        sb = self.verticalScrollBar()
+        
+        # Layout not ready - retry (max 5 times)
+        if sb.maximum() == 0:
+            if not hasattr(self, '_scroll_retries'):
+                self._scroll_retries = 0
+            self._scroll_retries += 1
+            if self._scroll_retries < 5:
+                QTimer.singleShot(50, self._do_scroll_to_bottom)
+            elif self._debug:
+                print(f"[CHAT-SCROLL] ⚠ Scroll retry limit reached (layout still empty)")
+            return
+        
+        # Execute scroll with programmatic flag
+        self._programmatic_scroll = True
+        sb.setValue(sb.maximum())
+        self._programmatic_scroll = False
+        
+        # Log significant position changes (reduces spam)
+        if self._debug:
+            if not hasattr(self, '_last_logged_max') or abs(sb.maximum() - self._last_logged_max) > 100:
+                print(f"[CHAT-SCROLL] Auto-scrolled to bottom (max={sb.maximum()})")
+                self._last_logged_max = sb.maximum()
+    
+    def clear_messages(self, reset_scroll=False):
+        """
+        Remove all message widgets from the chat.
+        
+        Args:
+            reset_scroll: If True, also set _should_follow=True (for new conversations).
+                         If False (default), preserve current scroll intent.
+        
+        IMPORTANT: During rebuilds (typing indicator → real message), use
+        reset_scroll=False to preserve user's scroll position!
+        """
+        num_cleared = len(self.message_widgets)
+        
+        for widget in self.message_widgets:
+            self.message_layout.removeWidget(widget)
+            widget.deleteLater()
+        self.message_widgets.clear()
+        
+        if reset_scroll:
+            self._should_follow = True
+            
+        if self._debug:
+            action = "RESET to follow" if reset_scroll else "preserved"
+            print(f"[CHAT-SCROLL] Cleared {num_cleared} messages (scroll intent {action}: _should_follow={self._should_follow})")
+    
+    def reset_scroll_state(self):
+        """Reset to auto-follow mode and scroll to bottom."""
+        self._should_follow = True
+        self._schedule_scroll()
+        if self._debug:
+            print("[CHAT-SCROLL] Reset scroll state to follow mode")
+    
+    def _scroll_to_bottom(self):
+        """Public method to trigger scroll to bottom (debounced)."""
+        self._schedule_scroll()
+    
+    def get_last_message_widget(self):
+        """Get the last message widget (for streaming updates)."""
+        return self.message_widgets[-1] if self.message_widgets else None
+
+
+def open_html_file(filepath):
+    """Open an HTML file in the default browser. Works cross-platform.
+    
+    Uses threading to avoid blocking main thread, and debouncing to prevent
+    rapid consecutive opens of the same file (which can freeze Windows Shell).
+    """
+    import threading
+    import time
+    
+    if not os.path.exists(filepath):
+        print(f"[GUI] HTML file not found: {filepath}")
+        QMessageBox.warning(None, "File Not Found", f"HTML file not found:\n{filepath}\n\nStart a conversation first to generate the HTML.")
+        return False
+    
+    # Debounce: prevent opening the same file within 2 seconds
+    if not hasattr(open_html_file, '_last_opened'):
+        open_html_file._last_opened = {}
+    
+    abs_path = os.path.abspath(filepath)
+    now = time.time()
+    
+    # Check if we opened this file recently
+    last_time = open_html_file._last_opened.get(abs_path, 0)
+    if now - last_time < 2.0:
+        print(f"[GUI] Skipping duplicate open request for: {abs_path}")
+        return True
+    
+    open_html_file._last_opened[abs_path] = now
+    
+    def _do_open():
+        """Run the actual file open in a background thread to avoid blocking UI"""
+        try:
+            if sys.platform == 'darwin':  # macOS
+                subprocess.run(['open', abs_path], check=True)
+            elif sys.platform == 'win32':  # Windows
+                os.startfile(abs_path)
+            else:  # Linux
+                subprocess.run(['xdg-open', abs_path], check=True)
+            
+            print(f"[GUI] Opened HTML file: {abs_path}")
+        except Exception as e:
+            print(f"[GUI] Error opening HTML file: {e}")
+            # Fallback to webbrowser module
+            try:
+                file_url = f"file://{abs_path}"
+                webbrowser.open(file_url)
+            except Exception as e2:
+                print(f"[GUI] Fallback also failed: {e2}")
+    
+    # Run in background thread to avoid blocking main thread
+    # os.startfile() can block on Windows when Shell is busy
+    thread = threading.Thread(target=_do_open, daemon=True)
+    thread.start()
+    return True
 
 
 def apply_glow_effect(widget, color, blur_radius=15, offset=(0, 2)):
@@ -82,6 +921,18 @@ def apply_glow_effect(widget, color, blur_radius=15, offset=(0, 2)):
     shadow.setOffset(offset[0], offset[1])
     widget.setGraphicsEffect(shadow)
     return shadow
+
+
+class NoScrollComboBox(QComboBox):
+    """A QComboBox that ignores wheel events so parent scroll area can scroll."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    
+    def wheelEvent(self, event):
+        """Ignore wheel events - let parent scroll instead."""
+        event.ignore()
 
 
 class GlowButton(QPushButton):
@@ -325,7 +1176,7 @@ class SignalIndicator(QWidget):
         elif self.latency_ms > 0:
             text = f"{self.latency_ms}ms"
         else:
-            text = "IDLE"
+            text = ""
         
         painter.drawText(40, 3, 40, 16, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
 
@@ -906,10 +1757,20 @@ class NetworkPane(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Title
-        title = QLabel("Propagation Network")
-        title.setStyleSheet("color: #D4D4D4; font-size: 14px; font-weight: bold; font-family: 'Orbitron', sans-serif;")
-        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Title with consistent tab header styling
+        title = QLabel("PROPAGATION NETWORK")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(f"""
+            color: {COLORS['accent_cyan']};
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px;
+            background-color: {COLORS['bg_medium']};
+            border-bottom: 1px solid {COLORS['border_glow']};
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        """)
+        layout.addWidget(title)
         
         # Network view - set to expand to fill available space
         self.network_view = NetworkGraphWidget()
@@ -1066,6 +1927,7 @@ class ImagePreviewPane(QWidget):
         super().__init__()
         self.current_image_path = None
         self.session_images = []  # List of all images generated this session
+        self.session_metadata = []  # List of metadata dicts {ai_name, prompt} for each image
         self.current_index = -1   # Current image index
         self.setup_ui()
     
@@ -1074,18 +1936,47 @@ class ImagePreviewPane(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
-        # Title label
-        self.title = QLabel("🎨 GENERATED IMAGES")
+        # Title with consistent tab header styling
+        self.title = QLabel("GENERATED IMAGES")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
+            color: {COLORS['accent_cyan']};
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px;
+            background-color: {COLORS['bg_medium']};
+            border-bottom: 1px solid {COLORS['border_glow']};
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        """)
+        layout.addWidget(self.title)
+        
+        # AI name label (below title)
+        self.ai_label = QLabel("")
+        self.ai_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['accent_purple']};
+                color: {COLORS['text_bright']};
+                font-size: 10px;
                 font-weight: bold;
-                font-size: 12px;
-                padding: 5px;
+                padding: 2px 5px;
             }}
         """)
-        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.title)
+        self.ai_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.ai_label)
+        
+        # Prompt label (below AI name)
+        self.prompt_label = QLabel("")
+        self.prompt_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+                font-style: italic;
+                padding: 2px 5px;
+            }}
+        """)
+        self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.prompt_label.setWordWrap(True)
+        layout.addWidget(self.prompt_label)
         
         # Image display label
         self.image_label = QLabel("No images generated yet")
@@ -1093,8 +1984,6 @@ class ImagePreviewPane(QWidget):
         self.image_label.setStyleSheet(f"""
             QLabel {{
                 background-color: {COLORS['bg_medium']};
-                border: 2px dashed {COLORS['border']};
-                border-radius: 8px;
                 color: {COLORS['text_dim']};
                 padding: 20px;
                 min-height: 200px;
@@ -1115,284 +2004,7 @@ class ImagePreviewPane(QWidget):
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_purple']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
-        self.prev_button.clicked.connect(self.show_previous)
-        self.prev_button.setEnabled(False)
-        nav_layout.addWidget(self.prev_button)
-        
-        # Position indicator
-        self.position_label = QLabel("")
-        self.position_label.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['text_dim']};
-                font-size: 11px;
-            }}
-        """)
-        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        nav_layout.addWidget(self.position_label, 1)
-        
-        # Next button
-        self.next_button = QPushButton("Next ▶")
-        self.next_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_purple']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
-        self.next_button.clicked.connect(self.show_next)
-        self.next_button.setEnabled(False)
-        nav_layout.addWidget(self.next_button)
-        
-        layout.addLayout(nav_layout)
-        
-        # Image info label
-        self.info_label = QLabel("")
-        self.info_label.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['text_dim']};
-                font-size: 10px;
-                padding: 5px;
-            }}
-        """)
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.info_label.setWordWrap(True)
-        layout.addWidget(self.info_label)
-        
-        # Open in folder button
-        self.open_button = QPushButton("📂 Open Images Folder")
-        self.open_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_purple']};
-            }}
-        """)
-        self.open_button.clicked.connect(self.open_images_folder)
-        layout.addWidget(self.open_button)
-    
-    def add_image(self, image_path):
-        """Add a new image to the session gallery and display it"""
-        if image_path and os.path.exists(image_path):
-            # Avoid duplicates
-            if image_path not in self.session_images:
-                self.session_images.append(image_path)
-            # Jump to the new image
-            self.current_index = len(self.session_images) - 1
-            self._display_current()
-    
-    def set_image(self, image_path):
-        """Display an image - also adds to gallery if new"""
-        self.add_image(image_path)
-    
-    def _display_current(self):
-        """Display the image at current_index"""
-        if not self.session_images or self.current_index < 0:
-            self.image_label.setText("No images generated yet")
-            self.info_label.setText("")
-            self.position_label.setText("")
-            self.prev_button.setEnabled(False)
-            self.next_button.setEnabled(False)
-            return
-        
-        image_path = self.session_images[self.current_index]
-        self.current_image_path = image_path
-        
-        if os.path.exists(image_path):
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                # Scale to fit the label while maintaining aspect ratio
-                scaled = pixmap.scaled(
-                    self.image_label.size() - QSize(20, 20),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.image_label.setPixmap(scaled)
-                self.image_label.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {COLORS['bg_medium']};
-                        border: 2px solid {COLORS['accent_purple']};
-                        border-radius: 8px;
-                        padding: 10px;
-                    }}
-                """)
-                
-                # Update info
-                filename = os.path.basename(image_path)
-                self.info_label.setText(f"📁 {filename}")
-            else:
-                self.image_label.setText("Failed to load image")
-                self.info_label.setText("")
-        else:
-            self.image_label.setText("Image not found")
-            self.info_label.setText("")
-        
-        # Update navigation
-        total = len(self.session_images)
-        current = self.current_index + 1
-        self.position_label.setText(f"{current} of {total}")
-        self.prev_button.setEnabled(self.current_index > 0)
-        self.next_button.setEnabled(self.current_index < total - 1)
-    
-    def show_previous(self):
-        """Show the previous image"""
-        if self.current_index > 0:
-            self.current_index -= 1
-            self._display_current()
-    
-    def show_next(self):
-        """Show the next image"""
-        if self.current_index < len(self.session_images) - 1:
-            self.current_index += 1
-            self._display_current()
-    
-    def clear_session(self):
-        """Clear all session images (e.g., when starting a new conversation)"""
-        self.session_images = []
-        self.current_index = -1
-        self.current_image_path = None
-        self.image_label.setText("No images generated yet")
-        self.image_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {COLORS['bg_medium']};
-                border: 2px dashed {COLORS['border']};
-                border-radius: 8px;
-                color: {COLORS['text_dim']};
-                padding: 20px;
-                min-height: 200px;
-            }}
-        """)
-        self.info_label.setText("")
-        self.position_label.setText("")
-        self.prev_button.setEnabled(False)
-        self.next_button.setEnabled(False)
-    
-    def open_images_folder(self):
-        """Open the images folder in file explorer"""
-        import subprocess
-        images_dir = os.path.join(os.path.dirname(__file__), 'images')
-        if os.path.exists(images_dir):
-            subprocess.Popen(f'explorer "{images_dir}"')
-        else:
-            # Try to create it
-            os.makedirs(images_dir, exist_ok=True)
-            subprocess.Popen(f'explorer "{images_dir}"')
-    
-    def resizeEvent(self, event):
-        """Re-scale image when pane is resized"""
-        super().resizeEvent(event)
-        if self.current_image_path:
-            self._display_current()
-
-
-class VideoPreviewPane(QWidget):
-    """Pane to display generated videos with navigation"""
-    def __init__(self):
-        super().__init__()
-        self.current_video_path = None
-        self.session_videos = []  # List of all videos generated this session
-        self.current_index = -1   # Current video index
-        self.setup_ui()
-    
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        # Title label
-        self.title = QLabel("🎬 GENERATED VIDEOS")
-        self.title.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['accent_cyan']};
-                font-weight: bold;
-                font-size: 12px;
-                padding: 5px;
-            }}
-        """)
-        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.title)
-        
-        # Video display area - we'll show a thumbnail or placeholder
-        self.video_label = QLabel("No videos generated yet")
-        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {COLORS['bg_medium']};
-                border: 2px dashed {COLORS['border']};
-                border-radius: 8px;
-                color: {COLORS['text_dim']};
-                padding: 20px;
-                min-height: 150px;
-            }}
-        """)
-        self.video_label.setWordWrap(True)
-        layout.addWidget(self.video_label, 1)
-        
-        # Play button
-        self.play_button = QPushButton("▶ Play Video")
-        self.play_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['accent_cyan']};
-                color: {COLORS['bg_dark']};
-                border: none;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['accent_purple']};
-            }}
-            QPushButton:disabled {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
-            }}
-        """)
-        self.play_button.clicked.connect(self.play_current_video)
-        self.play_button.setEnabled(False)
-        layout.addWidget(self.play_button)
-        
-        # Navigation controls
-        nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(8)
-        
-        # Previous button
-        self.prev_button = QPushButton("◀ Prev")
-        self.prev_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 0px;
                 padding: 6px 12px;
                 font-weight: bold;
             }}
@@ -1427,7 +2039,324 @@ class VideoPreviewPane(QWidget):
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 0px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.next_button.clicked.connect(self.show_next)
+        self.next_button.setEnabled(False)
+        nav_layout.addWidget(self.next_button)
+        
+        layout.addLayout(nav_layout)
+        
+        # Image info label
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                padding: 5px;
+            }}
+        """)
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+        
+        # Open in folder button
+        self.open_button = QPushButton("📂 Open Images Folder")
+        self.open_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 0px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        self.open_button.clicked.connect(self.open_images_folder)
+        layout.addWidget(self.open_button)
+    
+    def add_image(self, image_path, ai_name="", prompt=""):
+        """Add a new image to the session gallery and display it"""
+        if image_path and os.path.exists(image_path):
+            # Avoid duplicates
+            if image_path not in self.session_images:
+                self.session_images.append(image_path)
+                self.session_metadata.append({"ai_name": ai_name, "prompt": prompt})
+            # Jump to the new image
+            self.current_index = len(self.session_images) - 1
+            self._display_current()
+    
+    def set_image(self, image_path, ai_name="", prompt=""):
+        """Display an image - also adds to gallery if new"""
+        self.add_image(image_path, ai_name, prompt)
+    
+    def _display_current(self):
+        """Display the image at current_index"""
+        if not self.session_images or self.current_index < 0:
+            self.image_label.setText("No images generated yet")
+            self.info_label.setText("")
+            self.position_label.setText("")
+            self.ai_label.setText("")
+            self.prompt_label.setText("")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            return
+        
+        image_path = self.session_images[self.current_index]
+        self.current_image_path = image_path
+        
+        # Get metadata for this image
+        metadata = self.session_metadata[self.current_index] if self.current_index < len(self.session_metadata) else {}
+        ai_name = metadata.get("ai_name", "")
+        prompt = metadata.get("prompt", "")
+        
+        # Update AI name and prompt labels
+        self.ai_label.setText(ai_name if ai_name else "")
+        self.prompt_label.setText(f'"{prompt}"' if prompt else "")
+        
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # Scale to fit the label while maintaining aspect ratio
+                scaled = pixmap.scaled(
+                    self.image_label.size() - QSize(20, 20),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.image_label.setPixmap(scaled)
+                self.image_label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {COLORS['bg_medium']};
+                        border: 1px solid {COLORS['border']};
+                        padding: 10px;
+                    }}
+                """)
+                
+                # Update info
+                filename = os.path.basename(image_path)
+                self.info_label.setText(filename)
+            else:
+                self.image_label.setText("Failed to load image")
+                self.info_label.setText("")
+        else:
+            self.image_label.setText("Image not found")
+            self.info_label.setText("")
+        
+        # Update navigation
+        total = len(self.session_images)
+        current = self.current_index + 1
+        self.position_label.setText(f"{current} of {total}")
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < total - 1)
+    
+    def show_previous(self):
+        """Show the previous image"""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._display_current()
+    
+    def show_next(self):
+        """Show the next image"""
+        if self.current_index < len(self.session_images) - 1:
+            self.current_index += 1
+            self._display_current()
+    
+    def clear_session(self):
+        """Clear all session images (e.g., when starting a new conversation)"""
+        self.session_images = []
+        self.session_metadata = []
+        self.current_index = -1
+        self.current_image_path = None
+        self.image_label.setText("No images generated yet")
+        self.image_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 200px;
+            }}
+        """)
+        self.info_label.setText("")
+        self.position_label.setText("")
+        self.ai_label.setText("")
+        self.prompt_label.setText("")
+        self.prev_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+    
+    def open_images_folder(self):
+        """Open the images folder in file explorer"""
+        import subprocess
+        images_dir = os.path.join(os.path.dirname(__file__), 'images')
+        if os.path.exists(images_dir):
+            subprocess.Popen(f'explorer "{images_dir}"')
+        else:
+            # Try to create it
+            os.makedirs(images_dir, exist_ok=True)
+            subprocess.Popen(f'explorer "{images_dir}"')
+    
+    def resizeEvent(self, event):
+        """Re-scale image when pane is resized"""
+        super().resizeEvent(event)
+        if self.current_image_path:
+            self._display_current()
+
+
+class VideoPreviewPane(QWidget):
+    """Pane to display generated videos with navigation"""
+    def __init__(self):
+        super().__init__()
+        self.current_video_path = None
+        self.session_videos = []  # List of all videos generated this session
+        self.session_metadata = []  # List of metadata dicts {ai_name, prompt} for each video
+        self.current_index = -1   # Current video index
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # Title with consistent tab header styling
+        self.title = QLabel("GENERATED VIDEOS")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setStyleSheet(f"""
+            color: {COLORS['accent_cyan']};
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px;
+            background-color: {COLORS['bg_medium']};
+            border-bottom: 1px solid {COLORS['border_glow']};
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        """)
+        layout.addWidget(self.title)
+        
+        # AI name label (below title)
+        self.ai_label = QLabel("")
+        self.ai_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_bright']};
+                font-size: 10px;
+                font-weight: bold;
+                padding: 2px 5px;
+            }}
+        """)
+        self.ai_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.ai_label)
+        
+        # Prompt label (below AI name)
+        self.prompt_label = QLabel("")
+        self.prompt_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+                font-style: italic;
+                padding: 2px 5px;
+            }}
+        """)
+        self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.prompt_label.setWordWrap(True)
+        layout.addWidget(self.prompt_label)
+        
+        # Video display area - we'll show a thumbnail or placeholder
+        self.video_label = QLabel("No videos generated yet")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 150px;
+            }}
+        """)
+        self.video_label.setWordWrap(True)
+        layout.addWidget(self.video_label, 1)
+        
+        # Play button
+        self.play_button = QPushButton("▶ Play Video")
+        self.play_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
+                border: none;
+                border-radius: 0px;
+                padding: 10px 20px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_purple']};
+            }}
+            QPushButton:disabled {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+            }}
+        """)
+        self.play_button.clicked.connect(self.play_current_video)
+        self.play_button.setEnabled(False)
+        layout.addWidget(self.play_button)
+        
+        # Navigation controls
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+        
+        # Previous button
+        self.prev_button = QPushButton("◀ Prev")
+        self.prev_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 0px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.prev_button.clicked.connect(self.show_previous)
+        self.prev_button.setEnabled(False)
+        nav_layout.addWidget(self.prev_button)
+        
+        # Position indicator
+        self.position_label = QLabel("")
+        self.position_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+            }}
+        """)
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.position_label, 1)
+        
+        # Next button
+        self.next_button = QPushButton("Next ▶")
+        self.next_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 0px;
                 padding: 6px 12px;
                 font-weight: bold;
             }}
@@ -1466,7 +2395,7 @@ class VideoPreviewPane(QWidget):
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 0px;
                 padding: 8px;
             }}
             QPushButton:hover {{
@@ -1477,19 +2406,20 @@ class VideoPreviewPane(QWidget):
         self.open_button.clicked.connect(self.open_videos_folder)
         layout.addWidget(self.open_button)
     
-    def add_video(self, video_path):
+    def add_video(self, video_path, ai_name="", prompt=""):
         """Add a new video to the session gallery and display it"""
         if video_path and os.path.exists(video_path):
             # Avoid duplicates
             if video_path not in self.session_videos:
                 self.session_videos.append(video_path)
+                self.session_metadata.append({"ai_name": ai_name, "prompt": prompt})
             # Jump to the new video
             self.current_index = len(self.session_videos) - 1
             self._display_current()
     
-    def set_video(self, video_path):
+    def set_video(self, video_path, ai_name="", prompt=""):
         """Display a video - also adds to gallery if new"""
-        self.add_video(video_path)
+        self.add_video(video_path, ai_name, prompt)
     
     def _display_current(self):
         """Display the video at current_index"""
@@ -1497,6 +2427,8 @@ class VideoPreviewPane(QWidget):
             self.video_label.setText("No videos generated yet")
             self.info_label.setText("")
             self.position_label.setText("")
+            self.ai_label.setText("")
+            self.prompt_label.setText("")
             self.prev_button.setEnabled(False)
             self.next_button.setEnabled(False)
             self.play_button.setEnabled(False)
@@ -1505,6 +2437,15 @@ class VideoPreviewPane(QWidget):
         video_path = self.session_videos[self.current_index]
         self.current_video_path = video_path
         
+        # Get metadata for this video
+        metadata = self.session_metadata[self.current_index] if self.current_index < len(self.session_metadata) else {}
+        ai_name = metadata.get("ai_name", "")
+        prompt = metadata.get("prompt", "")
+        
+        # Update AI name and prompt labels
+        self.ai_label.setText(ai_name if ai_name else "")
+        self.prompt_label.setText(f'"{prompt}"' if prompt else "")
+        
         if os.path.exists(video_path):
             filename = os.path.basename(video_path)
             # Show video info
@@ -1512,14 +2453,13 @@ class VideoPreviewPane(QWidget):
             self.video_label.setStyleSheet(f"""
                 QLabel {{
                     background-color: {COLORS['bg_medium']};
-                    border: 2px solid {COLORS['accent_cyan']};
-                    border-radius: 8px;
+                    border: 1px solid {COLORS['border']};
                     color: {COLORS['text_bright']};
                     padding: 20px;
                     min-height: 150px;
                 }}
             """)
-            self.info_label.setText(f"📁 {filename}")
+            self.info_label.setText(filename)
             self.play_button.setEnabled(True)
         else:
             self.video_label.setText("Video not found")
@@ -1560,14 +2500,13 @@ class VideoPreviewPane(QWidget):
     def clear_session(self):
         """Clear all session videos (e.g., when starting a new conversation)"""
         self.session_videos = []
+        self.session_metadata = []
         self.current_index = -1
         self.current_video_path = None
         self.video_label.setText("No videos generated yet")
         self.video_label.setStyleSheet(f"""
             QLabel {{
                 background-color: {COLORS['bg_medium']};
-                border: 2px dashed {COLORS['border']};
-                border-radius: 8px;
                 color: {COLORS['text_dim']};
                 padding: 20px;
                 min-height: 150px;
@@ -1575,6 +2514,8 @@ class VideoPreviewPane(QWidget):
         """)
         self.info_label.setText("")
         self.position_label.setText("")
+        self.ai_label.setText("")
+        self.prompt_label.setText("")
         self.prev_button.setEnabled(False)
         self.next_button.setEnabled(False)
         self.play_button.setEnabled(False)
@@ -1603,7 +2544,7 @@ class RightSidebar(QWidget):
     def setup_ui(self):
         """Set up the tabbed sidebar interface"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(10, 10, 10, 10)  # Match left panel padding
         layout.setSpacing(0)
         
         # Create tab bar at the top (custom styled)
@@ -1621,8 +2562,8 @@ class RightSidebar(QWidget):
         # Tab buttons
         self.setup_button = QPushButton("⚙ SETUP")
         self.graph_button = QPushButton("🌐 GRAPH")
-        self.image_button = QPushButton("🖼 IMAGE")
-        self.video_button = QPushButton("🎬 VIDEO")
+        self.image_button = QPushButton("🖼 IMAGES")
+        self.video_button = QPushButton("🎬 VIDEOS")
         
         # Cyberpunk tab button styling
         tab_style = f"""
@@ -1710,15 +2651,15 @@ class RightSidebar(QWidget):
         self.image_button.setChecked(index == 2)
         self.video_button.setChecked(index == 3)
     
-    def update_image_preview(self, image_path):
+    def update_image_preview(self, image_path, ai_name="", prompt=""):
         """Update the image preview pane with a new image"""
         if hasattr(self, 'image_preview_pane'):
-            self.image_preview_pane.set_image(image_path)
+            self.image_preview_pane.set_image(image_path, ai_name, prompt)
     
-    def update_video_preview(self, video_path):
+    def update_video_preview(self, video_path, ai_name="", prompt=""):
         """Update the video preview pane with a new video"""
         if hasattr(self, 'video_preview_pane'):
-            self.video_preview_pane.set_video(video_path)
+            self.video_preview_pane.set_video(video_path, ai_name, prompt)
     
     def add_node(self, node_id, label, node_type):
         """Forward to network pane"""
@@ -1747,21 +2688,21 @@ class ControlPanel(QWidget):
         """Set up the user interface for the control panel - vertical sidebar layout"""
         # Main layout
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
         
-        # Add a title with cyberpunk styling
-        title = QLabel("═ CONTROL PANEL ═")
+        # Add a title with consistent tab header styling
+        title = QLabel("CONTROL PANEL")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 12px;
+            font-size: 13px;
             font-weight: bold;
-            padding: 10px;
+            padding: 12px;
             background-color: {COLORS['bg_medium']};
-            border: 1px solid {COLORS['border_glow']};
-            border-radius: 0px;
-            letter-spacing: 2px;
+            border-bottom: 1px solid {COLORS['border_glow']};
+            letter-spacing: 3px;
+            text-transform: uppercase;
         """)
         main_layout.addWidget(title)
         
@@ -1775,25 +2716,7 @@ class ControlPanel(QWidget):
                 border: none;
                 background-color: transparent;
             }}
-            QScrollBar:vertical {{
-                background: {COLORS['bg_medium']};
-                width: 10px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {COLORS['border_glow']};
-                min-height: 20px;
-                border-radius: 0px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {COLORS['accent_cyan']};
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
+            {get_scrollbar_style()}
         """)
         
         # Container widget for scrollable content
@@ -1815,11 +2738,10 @@ class ControlPanel(QWidget):
         mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         mode_layout.addWidget(mode_label)
         
-        self.mode_selector = QComboBox()
+        self.mode_selector = NoScrollComboBox()
         self.mode_selector.addItems(["AI-AI", "Human-AI"])
-        self.mode_selector.setStyleSheet(self.get_combobox_style())
+        self.mode_selector.setStyleSheet(get_combobox_style())
         mode_layout.addWidget(self.mode_selector)
-        controls_layout.addWidget(mode_container)
         
         # Iterations with slider
         iterations_container = QWidget()
@@ -1831,11 +2753,10 @@ class ControlPanel(QWidget):
         iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         iterations_layout.addWidget(iterations_label)
         
-        self.iterations_selector = QComboBox()
-        self.iterations_selector.addItems(["1", "2", "5", "6", "10", "100"])
-        self.iterations_selector.setStyleSheet(self.get_combobox_style())
+        self.iterations_selector = NoScrollComboBox()
+        self.iterations_selector.addItems(["1", "2", "4", "6", "12", "100"])
+        self.iterations_selector.setStyleSheet(get_combobox_style())
         iterations_layout.addWidget(self.iterations_selector)
-        controls_layout.addWidget(iterations_container)
         
         # Number of AIs selection
         num_ais_container = QWidget()
@@ -1847,12 +2768,92 @@ class ControlPanel(QWidget):
         num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         num_ais_layout.addWidget(num_ais_label)
         
-        self.num_ais_selector = QComboBox()
+        self.num_ais_selector = NoScrollComboBox()
         self.num_ais_selector.addItems(["1", "2", "3", "4", "5"])
         self.num_ais_selector.setCurrentText("3")  # Default to 3 AIs
-        self.num_ais_selector.setStyleSheet(self.get_combobox_style())
+        self.num_ais_selector.setStyleSheet(get_combobox_style())
         num_ais_layout.addWidget(self.num_ais_selector)
-        controls_layout.addWidget(num_ais_container)
+        
+        # AI Invite Tier Setting - Button Group
+        invite_tier_container = QWidget()
+        invite_tier_layout = QVBoxLayout(invite_tier_container)
+        invite_tier_layout.setContentsMargins(0, 0, 0, 0)
+        invite_tier_layout.setSpacing(5)
+        
+        invite_tier_label = QLabel("▸ AI INVITE TIER")
+        invite_tier_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        invite_tier_layout.addWidget(invite_tier_label)
+        
+        # Info text
+        invite_tier_info = QLabel("Controls which models AIs can add to the chat")
+        invite_tier_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px;")
+        invite_tier_layout.addWidget(invite_tier_info)
+        
+        # Button group container
+        btn_group_container = QWidget()
+        btn_group_layout = QHBoxLayout(btn_group_container)
+        btn_group_layout.setContentsMargins(0, 0, 0, 0)
+        btn_group_layout.setSpacing(0)
+        
+        # Create toggle buttons
+        self.invite_free_btn = QPushButton("Free")
+        self.invite_paid_btn = QPushButton("Paid")
+        self.invite_both_btn = QPushButton("All")
+        
+        # Store the buttons for easy access
+        self._invite_tier_buttons = [self.invite_free_btn, self.invite_paid_btn, self.invite_both_btn]
+        
+        # Style for toggle buttons
+        toggle_btn_style = f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+                padding: 6px 12px;
+                font-size: 10px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_normal']};
+            }}
+            QPushButton:checked {{
+                background-color: #164E63;
+                color: {COLORS['text_bright']};
+                border: 1px solid {COLORS['accent_cyan']};
+            }}
+        """
+        
+        for btn in self._invite_tier_buttons:
+            btn.setCheckable(True)
+            btn.setStyleSheet(toggle_btn_style)
+            btn.clicked.connect(self._on_invite_tier_clicked)
+            btn_group_layout.addWidget(btn)
+        
+        # Round corners on first and last buttons
+        self.invite_free_btn.setStyleSheet(toggle_btn_style + """
+            QPushButton { border-radius: 3px 0px 0px 3px; }
+        """)
+        self.invite_both_btn.setStyleSheet(toggle_btn_style + """
+            QPushButton { border-radius: 0px 3px 3px 0px; }
+        """)
+        
+        # Set default selection (Free)
+        self.invite_free_btn.setChecked(True)
+        
+        # Tooltips
+        self.invite_free_btn.setToolTip("AIs can only invite free models")
+        self.invite_paid_btn.setToolTip("AIs can only invite paid models")
+        self.invite_both_btn.setToolTip("AIs can invite any model")
+        
+        invite_tier_layout.addWidget(btn_group_container)
+        
+        # Allow duplicate models checkbox
+        self.allow_duplicate_models_checkbox = QCheckBox("Allow duplicate models")
+        self.allow_duplicate_models_checkbox.setChecked(False)  # Default to restricted
+        self.allow_duplicate_models_checkbox.setStyleSheet(get_checkbox_style())
+        self.allow_duplicate_models_checkbox.setToolTip("Allow AIs to add models that are already in the conversation")
+        invite_tier_layout.addWidget(self.allow_duplicate_models_checkbox)
         
         # AI-1 Model selection
         self.ai1_container = QWidget()
@@ -1864,10 +2865,9 @@ class ControlPanel(QWidget):
         ai1_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai1_layout.addWidget(ai1_label)
         
-        self.ai1_model_selector = QComboBox()
-        self.ai1_model_selector.setStyleSheet(self.get_combobox_style())
+        self.ai1_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
+        self.ai1_model_selector.setStyleSheet(get_combobox_style())
         ai1_layout.addWidget(self.ai1_model_selector)
-        controls_layout.addWidget(self.ai1_container)
         
         # AI-2 Model selection
         self.ai2_container = QWidget()
@@ -1879,10 +2879,9 @@ class ControlPanel(QWidget):
         ai2_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai2_layout.addWidget(ai2_label)
         
-        self.ai2_model_selector = QComboBox()
-        self.ai2_model_selector.setStyleSheet(self.get_combobox_style())
+        self.ai2_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
+        self.ai2_model_selector.setStyleSheet(get_combobox_style())
         ai2_layout.addWidget(self.ai2_model_selector)
-        controls_layout.addWidget(self.ai2_container)
         
         # AI-3 Model selection
         self.ai3_container = QWidget()
@@ -1894,10 +2893,9 @@ class ControlPanel(QWidget):
         ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai3_layout.addWidget(ai3_label)
         
-        self.ai3_model_selector = QComboBox()
-        self.ai3_model_selector.setStyleSheet(self.get_combobox_style())
+        self.ai3_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
+        self.ai3_model_selector.setStyleSheet(get_combobox_style())
         ai3_layout.addWidget(self.ai3_model_selector)
-        controls_layout.addWidget(self.ai3_container)
         
         # AI-4 Model selection
         self.ai4_container = QWidget()
@@ -1909,10 +2907,9 @@ class ControlPanel(QWidget):
         ai4_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai4_layout.addWidget(ai4_label)
         
-        self.ai4_model_selector = QComboBox()
-        self.ai4_model_selector.setStyleSheet(self.get_combobox_style())
+        self.ai4_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
+        self.ai4_model_selector.setStyleSheet(get_combobox_style())
         ai4_layout.addWidget(self.ai4_model_selector)
-        controls_layout.addWidget(self.ai4_container)
         
         # AI-5 Model selection
         self.ai5_container = QWidget()
@@ -1924,10 +2921,9 @@ class ControlPanel(QWidget):
         ai5_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai5_layout.addWidget(ai5_label)
         
-        self.ai5_model_selector = QComboBox()
-        self.ai5_model_selector.setStyleSheet(self.get_combobox_style())
+        self.ai5_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
+        self.ai5_model_selector.setStyleSheet(get_combobox_style())
         ai5_layout.addWidget(self.ai5_model_selector)
-        controls_layout.addWidget(self.ai5_container)
         
         # Prompt pair selection
         prompt_container = QWidget()
@@ -1939,76 +2935,15 @@ class ControlPanel(QWidget):
         prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         prompt_layout.addWidget(prompt_label)
         
-        self.prompt_pair_selector = QComboBox()
-        self.prompt_pair_selector.setStyleSheet(self.get_combobox_style())
+        self.prompt_pair_selector = NoScrollComboBox()
+        self.prompt_pair_selector.setStyleSheet(get_combobox_style())
         prompt_layout.addWidget(self.prompt_pair_selector)
-        controls_layout.addWidget(prompt_container)
-        
-        # Action buttons container
-        action_container = QWidget()
-        action_layout = QVBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(5)
-        
-        action_label = QLabel("▸ OPTIONS")
-        action_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        action_layout.addWidget(action_label)
-        
-        # Auto-generate images checkbox
-        self.auto_image_checkbox = QCheckBox("Auto-generate images")
-        self.auto_image_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: {COLORS['text_normal']};
-                spacing: 5px;
-                font-size: 10px;
-                padding: 4px;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                background-color: {COLORS['bg_medium']};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {COLORS['accent_cyan']};
-                border: 1px solid {COLORS['accent_cyan']};
-            }}
-            QCheckBox::indicator:hover {{
-                border: 1px solid {COLORS['accent_cyan']};
-            }}
-        """)
-        self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
-        action_layout.addWidget(self.auto_image_checkbox)
-        
-        # Removed: HTML contributions checkbox
-        
-        # Actions - buttons in vertical layout
-        actions_label = QLabel("▸ ACTIONS")
-        actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        action_layout.addWidget(actions_label)
-        
-        # Export button with glow
-        self.export_button = self.create_glow_button("📡 EXPORT", COLORS['accent_purple'])
-        action_layout.addWidget(self.export_button)
-        
-        # View HTML button with glow - opens the styled conversation
-        self.view_html_button = self.create_glow_button("🌐 VIEW HTML", COLORS['accent_green'])
-        self.view_html_button.setToolTip("View conversation as shareable HTML")
-        self.view_html_button.clicked.connect(lambda: open_html_in_browser("conversation_full.html"))
-        action_layout.addWidget(self.view_html_button)
-        
-        # BackroomsBench evaluation button
-        self.backroomsbench_button = self.create_glow_button("🌀 BACKROOMSBENCH (beta)", COLORS['accent_purple'])
-        self.backroomsbench_button.setToolTip("Run multi-judge AI evaluation (depth/philosophy)")
-        action_layout.addWidget(self.backroomsbench_button)
-        
-        controls_layout.addWidget(action_container)
         
         # Add all controls directly to controls_layout (now vertical)
         controls_layout.addWidget(mode_container)
         controls_layout.addWidget(iterations_container)
         controls_layout.addWidget(num_ais_container)
+        controls_layout.addWidget(invite_tier_container)
         
         # Divider
         divider1 = QLabel("─" * 20)
@@ -2041,102 +2976,97 @@ class ControlPanel(QWidget):
         divider3.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
         controls_layout.addWidget(divider3)
         
-        controls_layout.addWidget(action_container)
+        # OPTIONS section (in scrollable area)
+        options_label = QLabel("▸ OPTIONS")
+        options_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        controls_layout.addWidget(options_label)
         
-        # Add spacer
+        # Auto-generate images checkbox
+        self.auto_image_checkbox = QCheckBox("Create images from responses")
+        self.auto_image_checkbox.setStyleSheet(get_checkbox_style())
+        self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
+        controls_layout.addWidget(self.auto_image_checkbox)
+        
+        # Add spacer to push content to top
         controls_layout.addStretch()
         
         # Set the scroll area widget and add to main layout
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area, 1)  # Stretch to fill
+        
+        # ═══ STICKY FOOTER: ACTIONS ONLY ═══
+        # This stays visible at bottom regardless of scroll position
+        action_container = QWidget()
+        action_container.setObjectName("actionFooter")
+        action_container.setStyleSheet(f"""
+            QWidget#actionFooter {{
+                background-color: transparent;
+                border-top: 1px solid {COLORS['border_glow']};
+            }}
+        """)
+        action_layout = QVBoxLayout(action_container)
+        action_layout.setContentsMargins(10, 8, 10, 8)
+        action_layout.setSpacing(8)
+        
+        # Actions - buttons in vertical layout
+        actions_label = QLabel("▸ ACTIONS")
+        actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px; background: transparent; border: none;")
+        action_layout.addWidget(actions_label)
+        
+        # Export button
+        self.export_button = QPushButton("📡 EXPORT")
+        self.export_button.setStyleSheet(get_button_style(COLORS['accent_purple']))
+        action_layout.addWidget(self.export_button)
+        
+        # View HTML button - opens the styled conversation
+        self.view_html_button = QPushButton("🌐 VIEW HTML")
+        self.view_html_button.setStyleSheet(get_button_style(COLORS['accent_green']))
+        self.view_html_button.clicked.connect(self._open_current_html)
+        action_layout.addWidget(self.view_html_button)
+
+        # BackroomsBench evaluation button
+        self.backroomsbench_button = QPushButton("🌀 BACKROOMSBENCH (beta)")
+        self.backroomsbench_button.setStyleSheet(get_button_style(COLORS['accent_purple']))
+        self.backroomsbench_button.setToolTip("Run multi-judge AI evaluation (depth/philosophy)")
+        action_layout.addWidget(self.backroomsbench_button)
+
+        main_layout.addWidget(action_container)  # Sticky at bottom
     
-    def get_combobox_style(self):
-        """Get the style for comboboxes - cyberpunk themed"""
-        return f"""
-            QComboBox {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 8px 10px;
-                min-height: 30px;
-                font-size: 10px;
-            }}
-            QComboBox:hover {{
-                border: 1px solid {COLORS['accent_cyan']};
-                color: {COLORS['text_bright']};
-            }}
-            QComboBox::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px;
-                border-left: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-            }}
-            QComboBox::down-arrow {{
-                width: 12px;
-                height: 12px;
-                image: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_normal']};
-                selection-background-color: {COLORS['accent_cyan']};
-                selection-color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 4px;
-            }}
-            QComboBox QAbstractItemView::item {{
-                min-height: 28px;
-                padding: 4px;
-            }}
-        """
+    # NOTE: get_combobox_style() has been moved to styles.py
+    # Use the imported get_combobox_style() function instead of get_combobox_style()
     
-    def get_cyberpunk_button_style(self, accent_color):
-        """Get cyberpunk-themed button style with given accent color"""
-        return f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {accent_color};
-                border: 2px solid {accent_color};
-                border-radius: 3px;
-                padding: 10px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: {accent_color};
-                color: {COLORS['bg_dark']};
-                border: 2px solid {accent_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['bg_light']};
-                color: {accent_color};
-            }}
-        """
+    # NOTE: get_cyberpunk_button_style() has been moved to styles.py as get_button_style()
+    # Use the imported get_button_style() function instead of self.get_cyberpunk_button_style()
     
     def create_glow_button(self, text, accent_color):
         """Create a button with glow effect"""
         button = GlowButton(text, accent_color)
-        button.setStyleSheet(self.get_cyberpunk_button_style(accent_color))
+        button.setStyleSheet(get_button_style(accent_color))
         return button
+    
+    def _on_invite_tier_clicked(self):
+        """Handle invite tier button clicks - ensure only one is selected"""
+        clicked_btn = self.sender()
+        for btn in self._invite_tier_buttons:
+            if btn != clicked_btn:
+                btn.setChecked(False)
+        # Ensure at least one is always selected
+        if not clicked_btn.isChecked():
+            clicked_btn.setChecked(True)
+    
+    def get_ai_invite_tier(self):
+        """Get the current AI invite tier setting"""
+        if self.invite_free_btn.isChecked():
+            return "Free"
+        elif self.invite_paid_btn.isChecked():
+            return "Paid"
+        else:
+            return "Both"
     
     def initialize_selectors(self):
         """Initialize the selector dropdowns with values from config"""
-        # Add AI models
-        self.ai1_model_selector.clear()
-        self.ai2_model_selector.clear()
-        self.ai3_model_selector.clear()
-        self.ai4_model_selector.clear()
-        self.ai5_model_selector.clear()
-        self.ai1_model_selector.addItems(list(AI_MODELS.keys()))
-        self.ai2_model_selector.addItems(list(AI_MODELS.keys()))
-        self.ai3_model_selector.addItems(list(AI_MODELS.keys()))
-        self.ai4_model_selector.addItems(list(AI_MODELS.keys()))
-        self.ai5_model_selector.addItems(list(AI_MODELS.keys()))
+        # AI model selectors are GroupedModelComboBox instances that self-populate
+        # from config.AI_MODELS - no need to manually add items here
         
         # Add prompt pairs
         self.prompt_pair_selector.clear()
@@ -2163,6 +3093,42 @@ class ControlPanel(QWidget):
         self.ai3_container.setVisible(num_ais >= 3)
         self.ai4_container.setVisible(num_ais >= 4)
         self.ai5_container.setVisible(num_ais >= 5)
+    
+    def _open_current_html(self):
+        """Open the current session's HTML file in browser"""
+        try:
+            # Get main window to access current_html_file
+            main_window = self.window()
+            current_file = getattr(main_window, 'current_html_file', None)
+            
+            if current_file and os.path.exists(current_file):
+                open_html_file(current_file)
+            else:
+                # Fallback: try to find the most recent conversation file in outputs
+                from config import OUTPUTS_DIR
+                import glob
+                
+                pattern = os.path.join(OUTPUTS_DIR, "conversation_*.html")
+                files = glob.glob(pattern)
+                
+                if files:
+                    # Get the most recent file
+                    latest_file = max(files, key=os.path.getmtime)
+                    open_html_file(latest_file)
+                else:
+                    # No files found
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        self,
+                        "No Conversation",
+                        "No conversation HTML file found.\nStart a conversation first."
+                    )
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Error opening HTML file: {e}")
+            traceback.print_exc()
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Error opening HTML file:\n{e}")
 
 class ConversationContextMenu(QMenu):
     """Context menu for the conversation display"""
@@ -2201,20 +3167,20 @@ class ConversationContextMenu(QMenu):
         """)
     
     def on_rabbithole_selected(self):
-        """Signal that rabbithole action was selected"""
-        if self.parent() and hasattr(self.parent(), 'rabbithole_from_selection'):
-            cursor = self.parent().conversation_display.textCursor()
-            selected_text = cursor.selectedText()
-            if selected_text and hasattr(self.parent(), 'rabbithole_callback'):
-                self.parent().rabbithole_callback(selected_text)
+        """Signal that rabbithole action was selected
+        
+        NOTE: With widget-based chat, text selection requires different handling.
+        """
+        # TODO: Implement selection tracking across message widgets
+        pass
     
     def on_fork_selected(self):
-        """Signal that fork action was selected"""
-        if self.parent() and hasattr(self.parent(), 'fork_from_selection'):
-            cursor = self.parent().conversation_display.textCursor()
-            selected_text = cursor.selectedText()
-            if selected_text and hasattr(self.parent(), 'fork_callback'):
-                self.parent().fork_callback(selected_text)
+        """Signal that fork action was selected
+        
+        NOTE: With widget-based chat, text selection requires different handling.
+        """
+        # TODO: Implement selection tracking across message widgets
+        pass
 
 class ConversationPane(QWidget):
     """Left pane containing the conversation and input area"""
@@ -2226,6 +3192,19 @@ class ConversationPane(QWidget):
         
         # Connect signals and slots
         self.connect_signals()
+        
+        # =====================================================================
+        # SCROLL STATE MANAGEMENT (ChatScrollArea approach)
+        # =====================================================================
+        # Scroll state is now managed by ChatScrollArea + MessageWidget:
+        # - Each message is a separate widget (no setHtml destroying everything)
+        # - ChatScrollArea tracks user scroll intent via valueChanged
+        # - Adding messages just appends widgets, preserving scroll position
+        # =====================================================================
+        
+        # Debug flag (ChatScrollArea has its own _debug flag)
+        if self._SCROLL_DEBUG:
+            print("[SCROLL] ConversationPane initialized with ChatScrollArea")
         
         # Initialize state
         self.conversation = []
@@ -2291,7 +3270,7 @@ class ConversationPane(QWidget):
             letter-spacing: 2px;
         """)
         
-        self.info_label = QLabel("[ AI-TO-AI PROPAGATION ]")
+        self.info_label = QLabel("[ AI-TO-AI CONVERSATION ]")
         self.info_label.setStyleSheet(f"""
             color: {COLORS['text_glow']};
             font-size: 10px;
@@ -2305,55 +3284,22 @@ class ConversationPane(QWidget):
         
         layout.addLayout(title_layout)
         
-        # Conversation display (read-only text edit in a scroll area)
-        self.conversation_display = QTextEdit()
-        self.conversation_display.setReadOnly(True)
+        # Conversation display (widget-based chat scroll area)
+        # Each message is a separate widget - no setHtml() means no scroll jumping!
+        self.conversation_display = ChatScrollArea()
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
         
-        # Set font for conversation display - use Iosevka Term for better ASCII art rendering
+        # Set font for the container (will cascade to message widgets)
         font = QFont("Iosevka Term", 10)
-        # Set fallbacks in case Iosevka Term isn't loaded
         font.setStyleHint(QFont.StyleHint.Monospace)
-        self.conversation_display.setFont(font)
-        
-        # Apply cyberpunk styling
-        self.conversation_display.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 15px;
-                selection-background-color: {COLORS['accent_cyan']};
-                selection-color: {COLORS['bg_dark']};
-            }}
-            QScrollBar:vertical {{
-                background: {COLORS['bg_medium']};
-                width: 10px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {COLORS['border_glow']};
-                min-height: 20px;
-                border-radius: 0px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {COLORS['accent_cyan']};
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
-        """)
+        self.conversation_display.container.setFont(font)
         
         # Input area with label
         input_container = QWidget()
         input_layout = QVBoxLayout(input_container)
         input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(2)  # Reduced spacing
+        input_layout.setSpacing(8)  # Better spacing between input and buttons
         
         input_label = QLabel("Your message:")
         input_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
@@ -2391,10 +3337,11 @@ class ConversationPane(QWidget):
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border_glow']};
                 border-radius: 0px;
-                padding: 6px 10px;
+                padding: 8px 14px;
                 font-weight: bold;
                 font-size: 10px;
                 letter-spacing: 1px;
+                min-width: 70px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_light']};
@@ -2407,25 +3354,23 @@ class ConversationPane(QWidget):
         """)
         self.upload_image_button.setToolTip("Upload an image to include in your message")
         
-        # Clear button with subtle glow
-        self.clear_button = GlowButton("CLEAR", COLORS['accent_pink'])
-        self.clear_button.shadow.setBlurRadius(5)  # Subtler glow
-        self.clear_button.base_blur = 5
-        self.clear_button.hover_blur = 12
+        # Clear button - no glow effect
+        self.clear_button = QPushButton("CLEAR")
         self.clear_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border_glow']};
-                border-radius: 3px;
-                padding: 8px 12px;
+                border-radius: 0px;
+                padding: 8px 14px;
                 font-weight: bold;
                 font-size: 10px;
                 letter-spacing: 1px;
+                min-width: 70px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_light']};
-                border: 2px solid {COLORS['accent_pink']};
+                border: 1px solid {COLORS['accent_pink']};
                 color: {COLORS['accent_pink']};
             }}
             QPushButton:pressed {{
@@ -2439,17 +3384,17 @@ class ConversationPane(QWidget):
             QPushButton {{
                 background-color: {COLORS['accent_cyan']};
                 color: {COLORS['bg_dark']};
-                border: 2px solid {COLORS['accent_cyan']};
-                border-radius: 3px;
-                padding: 8px 20px;
+                border: 1px solid {COLORS['accent_cyan']};
+                border-radius: 0px;
+                padding: 8px 14px;
                 font-weight: bold;
-                font-size: 11px;
-                letter-spacing: 2px;
+                font-size: 10px;
+                letter-spacing: 1px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
-                border: 2px solid {COLORS['accent_cyan']};
+                border: 1px solid {COLORS['accent_cyan']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['accent_cyan_active']};
@@ -2458,14 +3403,45 @@ class ConversationPane(QWidget):
             QPushButton:disabled {{
                 background-color: {COLORS['border']};
                 color: {COLORS['text_dim']};
-                border: 2px solid {COLORS['border']};
+                border: 1px solid {COLORS['border']};
             }}
         """)
+        
+        # Reset button - clears conversation context (no glow)
+        self.reset_button = QPushButton("↺ RESET")
+        self.reset_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['accent_pink']};
+                border: 1px solid {COLORS['accent_pink']};
+                border-radius: 0px;
+                padding: 8px 14px;
+                font-weight: bold;
+                font-size: 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_pink']};
+                color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['accent_pink']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['accent_pink']};
+                color: {COLORS['text_bright']};
+            }}
+            QPushButton:disabled {{
+                background-color: transparent;
+                color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+            }}
+        """)
+        self.reset_button.setToolTip("Clear conversation and start fresh")
         
         # Add buttons to layout
         button_layout.addWidget(self.upload_image_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addStretch()
+        button_layout.addWidget(self.reset_button)
         button_layout.addWidget(self.submit_button)
         
         # Add input container to main layout
@@ -2479,6 +3455,9 @@ class ConversationPane(QWidget):
         """Connect signals and slots"""
         # Submit button
         self.submit_button.clicked.connect(self.handle_propagate_click)
+        
+        # Reset button
+        self.reset_button.clicked.connect(self.handle_reset_click)
         
         # Upload image button
         self.upload_image_button.clicked.connect(self.handle_upload_image)
@@ -2494,7 +3473,7 @@ class ConversationPane(QWidget):
         self.input_field.clear()
         self.uploaded_image_path = None
         self.uploaded_image_base64 = None
-        self.upload_image_button.setText("📎 Image")
+        self.upload_image_button.setText("📎 IMAGE")
         self.input_field.setFocus()
     
     def handle_upload_image(self):
@@ -2578,7 +3557,7 @@ class ConversationPane(QWidget):
         self.input_field.clear()
         self.uploaded_image_path = None
         self.uploaded_image_base64 = None
-        self.upload_image_button.setText("📎 Image")
+        self.upload_image_button.setText("📎 IMAGE")
         self.input_field.setPlaceholderText("Seed the conversation or just click propagate...")
         
         # Always call the input callback, even with empty input
@@ -2587,6 +3566,41 @@ class ConversationPane(QWidget):
         
         # Start loading animation
         self.start_loading()
+    
+    def handle_reset_click(self):
+        """Handle click on the reset button - clears conversation context"""
+        # Get the main window reference
+        main_window = self.window()
+        
+        # Clear main conversation
+        if hasattr(main_window, 'main_conversation'):
+            main_window.main_conversation = []
+        
+        # Clear branch conversations
+        if hasattr(main_window, 'branch_conversations'):
+            main_window.branch_conversations = {}
+        
+        # Clear active branch
+        if hasattr(main_window, 'active_branch'):
+            main_window.active_branch = None
+        
+        # Clear local conversation reference
+        self.conversation = []
+        
+        # Clear the input field
+        self.input_field.clear()
+        self.uploaded_image_path = None
+        self.uploaded_image_base64 = None
+        self.upload_image_button.setText("📎 IMAGE")
+        
+        # Re-render empty conversation
+        self.render_conversation()
+        
+        # Update status bar
+        if hasattr(main_window, 'statusBar'):
+            main_window.statusBar().showMessage("Conversation reset - ready for new session")
+        
+        print("[UI] Conversation reset by user")
     
     def set_input_callback(self, callback):
         """Set callback function for input submission"""
@@ -2600,38 +3614,353 @@ class ConversationPane(QWidget):
         """Set callback function for fork creation"""
         self.fork_callback = callback
     
+    # =========================================================================
+    # SCROLL MANAGEMENT
+    # =========================================================================
+    # 
+    # This section handles scroll behavior for the chat display.
+    # See ChatScrollArea docstring for full architecture documentation.
+    #
+    # DEBUG LOGGING:
+    # - Set _SCROLL_DEBUG = True to enable [SCROLL] prefixed log messages
+    # - ChatScrollArea has its own _debug flag for [CHAT-SCROLL] messages
+    # - Both should be enabled together for full debugging
+    #
+    # QUICK REFERENCE:
+    # - [CHAT-SCROLL] messages come from ChatScrollArea (low-level scroll ops)
+    # - [SCROLL] messages come from ConversationPane (high-level render ops)
+    # =========================================================================
+
+    _SCROLL_DEBUG = DEVELOPER_TOOLS  # Enable [SCROLL] logging (controlled by config.DEVELOPER_TOOLS)
+    
+    def reset_scroll_state(self):
+        """Reset to auto-scroll mode (delegates to ChatScrollArea)."""
+        self.conversation_display.reset_scroll_state()
+    
     def update_conversation(self, conversation):
         """Update conversation display"""
         self.conversation = conversation
         self.render_conversation()
     
-    def render_conversation(self):
-        """Render conversation in the display"""
-        # Save scroll position before re-rendering
-        scrollbar = self.conversation_display.verticalScrollBar()
-        old_scroll_value = scrollbar.value()
-        old_scroll_max = scrollbar.maximum()
-        was_at_bottom = old_scroll_value >= old_scroll_max - 20
+    def update_streaming_content(self, ai_name: str, new_content: str):
+        """
+        Fast-path for streaming updates - bypasses full render pipeline.
         
-        # Clear display
-        self.conversation_display.clear()
+        Only updates the content of a matching streaming widget without rebuilding
+        the displayable list or checking all widgets.
         
-        # Create HTML for conversation with modern styling
+        Args:
+            ai_name: The AI whose message is being streamed
+            new_content: The new text content (full content, not delta)
+        
+        Returns:
+            True if update was applied, False if full render is needed
+        """
+        try:
+            # Find the streaming widget that matches this AI
+            for widget in reversed(self.conversation_display.message_widgets):
+                if hasattr(widget, 'message_data'):
+                    widget_ai = widget.message_data.get('ai_name', '')
+                    widget_role = widget.message_data.get('role', '')
+                    is_streaming = widget.message_data.get('_streaming', False)
+                    # Match by AI name AND streaming flag to avoid updating wrong widget
+                    if widget_ai == ai_name and widget_role == 'assistant' and is_streaming:
+                        widget.update_content(new_content)
+                        # Schedule scroll if following
+                        if self.conversation_display._should_follow:
+                            self.conversation_display._schedule_scroll()
+                        return True
+            return False
+        except Exception as e:
+            print(f"[STREAM] Fast-path failed: {e}")
+            return False
+    
+    def update_streaming_widget(self, ai_name: str, new_content: str):
+        """
+        Update a specific AI's streaming widget directly.
+        
+        This is the primary method for streaming updates - it finds the exact
+        widget for this AI's streaming message and updates it in place.
+        Does NOT trigger re-render which could cause cross-contamination.
+        
+        Args:
+            ai_name: The AI whose message is being streamed (e.g., "AI-1")
+            new_content: The complete current content (not a delta)
+        """
+        try:
+            # Find the streaming widget for this specific AI
+            for widget in reversed(self.conversation_display.message_widgets):
+                if hasattr(widget, 'message_data'):
+                    msg_data = widget.message_data
+                    if (msg_data.get('ai_name') == ai_name and 
+                        msg_data.get('role') == 'assistant' and
+                        msg_data.get('_streaming', False)):
+                        # Found it - update content directly
+                        widget.update_content(new_content)
+                        # Auto-scroll if user is following
+                        if self.conversation_display._should_follow:
+                            self.conversation_display._schedule_scroll()
+                        return
+            # Widget not found - might need a full render
+            print(f"[STREAM] Widget not found for {ai_name}, triggering render")
+            self.render_conversation()
+        except Exception as e:
+            print(f"[STREAM] update_streaming_widget failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def render_conversation(self, immediate=False):
+        """Render conversation in the display (debounced by default)
+        
+        Args:
+            immediate: If True, skip debounce and render now (for critical updates)
+        """
+        try:
+            # Initialize render timer once
+            if not hasattr(self, '_render_timer') or self._render_timer is None:
+                self._render_timer = QTimer()
+                self._render_timer.setSingleShot(True)
+                self._render_timer.timeout.connect(self._do_render)
+            
+            if immediate:
+                self._render_timer.stop()
+                self._do_render()
+            else:
+                # Debounce - batches rapid calls (reduced from 50ms to 16ms for responsiveness)
+                self._render_timer.stop()
+                self._render_timer.start(16)
+        except Exception as e:
+            print(f"[SCROLL ERROR] render_conversation: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _do_render(self):
+        """Actually perform the render using ChatScrollArea + MessageWidgets.
+        
+        ARCHITECTURE:
+        ═══════════════════════════════════════════════════════════════════════════
+        
+        Two modes based on whether streaming is active:
+        
+        1. STREAMING MODE (when any message has _streaming=True):
+           - Uses incremental updates for performance
+           - Only adds new widgets, doesn't touch existing ones
+           - Widget content updates happen via update_streaming_widget() directly
+        
+        2. REBUILD MODE (when no streaming is active):
+           - Always rebuilds all widgets
+           - Ensures correctness when content changes, messages replaced, etc.
+           - Uses setUpdatesEnabled(False) to prevent flicker
+           - Preserves scroll state
+        
+        This solves edge cases where count is same but content differs:
+        - Streaming complete (raw content → cleaned content)
+        - Notification removed + image added (same count, different widgets)
+        - Any message content modification
+        ═══════════════════════════════════════════════════════════════════════════
+        """
+        try:
+            existing_count = len(self.conversation_display.message_widgets)
+            
+            # Build list of displayable messages
+            displayable = []
+            has_streaming = False
+            
+            for message in self.conversation:
+                content = message.get('content', '')
+                text_content = self._extract_text_content(content)
+                msg_type = message.get('_type', '')
+                
+                # Track if any message is actively streaming
+                if message.get('_streaming'):
+                    has_streaming = True
+                
+                # Always show notifications
+                if msg_type == 'agent_notification':
+                    displayable.append(message)
+                    continue
+                
+                # Always show generated images and videos
+                if msg_type in ('generated_image', 'generated_video'):
+                    displayable.append(message)
+                    continue
+                
+                # Always show streaming placeholders (even if empty)
+                if message.get('_streaming'):
+                    displayable.append(message)
+                    continue
+                
+                # Skip empty messages (no text and no image)
+                if not text_content or not text_content.strip():
+                    has_image = message.get('generated_image_path') or self._has_image_content(content)
+                    if not has_image:
+                        continue
+                
+                displayable.append(message)
+            
+            new_count = len(displayable)
+            
+            if has_streaming:
+                # STREAMING MODE: Incremental updates for performance
+                if new_count > existing_count:
+                    # Add only the new messages
+                    for i in range(existing_count, new_count):
+                        self.conversation_display.add_message(displayable[i])
+                elif new_count < existing_count:
+                    # Count decreased during streaming (rare) - rebuild
+                    self._rebuild_all_messages(displayable)
+                # If count same: do nothing - streaming updates widget directly
+            else:
+                # REBUILD MODE: Always rebuild for correctness
+                # This handles: streaming complete, notification→image, content changes
+                if existing_count > 0 or new_count > 0:
+                    self._rebuild_all_messages(displayable)
+                
+        except Exception as e:
+            print(f"[RENDER ERROR] _do_render: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _rebuild_all_messages(self, displayable):
+        """
+        Rebuild all message widgets with scroll state preservation.
+        
+        Called when message count decreased (e.g., message deletion, conversation clear).
+        
+        CRITICAL: Preserves _should_follow so user's scroll position is respected!
+        
+        Process:
+        1. Save current _should_follow state
+        2. Disable visual updates (prevents flash)
+        3. Block scroll detection (_programmatic_scroll = True)
+        4. Clear and rebuild all widgets
+        5. Restore states in correct order (scroll intent → programmatic flag → visual)
+        6. Only scroll to bottom if user WAS following
+        
+        Debug log: "[SCROLL] Rebuild: ..." shows the preserved state
+        """
+        # Save scroll state before rebuild
+        saved_should_follow = self.conversation_display._should_follow
+        num_messages = len(displayable)
+        
+        if self._SCROLL_DEBUG:
+            print(f"[SCROLL] Rebuild starting: {num_messages} messages, _should_follow={saved_should_follow}")
+        
+        # Disable updates to prevent visual flash
+        self.conversation_display.setUpdatesEnabled(False)
+        
+        # Block scroll detection during rebuild
+        self.conversation_display._programmatic_scroll = True
+        
+        try:
+            self.conversation_display.clear_messages()  # reset_scroll=False by default
+            for msg in displayable:
+                self.conversation_display.add_message(msg)
+        finally:
+            # Restore states - ORDER MATTERS!
+            # 1. Restore scroll intent BEFORE allowing scroll detection
+            self.conversation_display._should_follow = saved_should_follow
+            # 2. Then allow scroll detection again
+            self.conversation_display._programmatic_scroll = False
+            # 3. Re-enable visual updates
+            self.conversation_display.setUpdatesEnabled(True)
+            
+            # Only scroll if user was following
+            if saved_should_follow:
+                self.conversation_display._schedule_scroll()
+            
+            if self._SCROLL_DEBUG:
+                action = "will scroll" if saved_should_follow else "NO scroll (user scrolled away)"
+                print(f"[SCROLL] Rebuild complete: {action}")
+    
+    def _extract_text_content(self, content):
+        """Extract text from content (handles structured content with images)."""
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'text':
+                    text_parts.append(part.get('text', ''))
+            return ''.join(text_parts)
+        return str(content) if content else ''
+    
+    def _has_image_content(self, content):
+        """Check if content contains image data."""
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'image':
+                    return True
+        return False
+    
+    def _get_conversation_as_text(self):
+        """Build plain text version of conversation for export."""
+        lines = []
+        for message in self.conversation:
+            role = message.get('role', '')
+            content = message.get('content', '')
+            ai_name = message.get('ai_name', 'AI')
+            model = message.get('model', '')
+            
+            # Extract text from structured content
+            text_content = self._extract_text_content(content)
+            
+            # Skip empty messages
+            if not text_content.strip():
+                continue
+            
+            # Format based on role
+            if role == 'user':
+                lines.append(f"You:\n{text_content}\n")
+            elif role == 'assistant':
+                display_name = f"{ai_name} ({model})" if model else ai_name
+                lines.append(f"{display_name}:\n{text_content}\n")
+            elif role == 'system':
+                lines.append(f"[System: {text_content}]\n")
+        
+        return '\n'.join(lines)
+    
+    # Keep _build_html_content for HTML export functionality
+    def _build_html_content_for_export(self):
+        """Build HTML content for conversation (returns string, doesn't set it)"""
+        
+        # Create HTML for conversation with styling that Qt actually supports
+        # The original approach uses <style> block + classes - this works in Qt
         html = "<style>"
-        html += f"body {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; font-size: 10pt; line-height: 1.4; }}"
-        html += f".message {{ margin-bottom: 10px; padding: 8px; border-radius: 4px; }}"
-        html += f".user {{ background-color: {COLORS['bg_medium']}; }}"
-        html += f".assistant {{ background-color: {COLORS['bg_medium']}; }}"
-        html += f".system {{ background-color: {COLORS['bg_medium']}; font-style: italic; }}"
-        html += f".header {{ font-weight: bold; margin: 10px 0; color: {COLORS['accent_blue']}; }}"
+        html += f"body {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; font-size: 10pt; line-height: 1.4; margin: 0; padding: 0; }}"
+        # Message blocks - use both margin-top and margin-bottom for reliable spacing in Qt
+        html += f".message {{ margin: 12px 4px; padding: 10px 12px; border-radius: 0px; background-color: {COLORS['bg_medium']}; }}"
+        html += f".user {{ border-right: 3px solid {COLORS['human']}; }}"
+        html += f".ai-1 {{ border-left: 3px solid {COLORS['ai_1']}; }}"
+        html += f".ai-2 {{ border-left: 3px solid {COLORS['ai_2']}; }}"
+        html += f".ai-3 {{ border-left: 3px solid {COLORS['ai_3']}; }}"
+        html += f".ai-4 {{ border-left: 3px solid {COLORS['ai_4']}; }}"
+        html += f".ai-5 {{ border-left: 3px solid {COLORS['ai_5']}; }}"
+        html += f".system {{ border-left: 3px solid {COLORS['text_dim']}; font-style: italic; }}"
+        html += f".header {{ font-weight: bold; margin-bottom: 8px; }}"
+        html += f".header-human {{ color: {COLORS['human']}; text-align: right; }}"
+        html += f".header-ai-1 {{ color: {COLORS['ai_1']}; }}"
+        html += f".header-ai-2 {{ color: {COLORS['ai_2']}; }}"
+        html += f".header-ai-3 {{ color: {COLORS['ai_3']}; }}"
+        html += f".header-ai-4 {{ color: {COLORS['ai_4']}; }}"
+        html += f".header-ai-5 {{ color: {COLORS['ai_5']}; }}"
         html += f".content {{ white-space: pre-wrap; color: {COLORS['text_normal']}; }}"
-        html += f".branch-indicator {{ color: {COLORS['text_dim']}; font-style: italic; text-align: center; margin: 8px 0; }}"
+        html += f".content-right {{ text-align: right; }}"
+        html += f".branch-indicator {{ color: {COLORS['text_dim']}; font-style: italic; text-align: center; margin: 12px 4px; }}"
         html += f".rabbithole {{ color: {COLORS['accent_green']}; }}"
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
-        html += f".agent-notification {{ background-color: #1a2a2a; border-left: 3px solid {COLORS['accent_cyan']}; padding: 8px 12px; margin: 8px 0; color: {COLORS['accent_cyan']}; font-style: normal; }}"
-        # Removed HTML contribution styling
-        html += f"pre {{ background-color: {COLORS['bg_dark']}; border: 1px solid {COLORS['border']}; border-radius: 3px; padding: 8px; overflow-x: auto; margin: 8px 0; }}"
-        html += f"code {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; color: {COLORS['text_bright']}; }}"
+        # Notification styles - error (pink), success (green), info (yellow)
+        html += f".notify-error {{ background-color: #1a1a2a; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
+        html += f".notify-success {{ background-color: #1a2a1a; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
+        html += f".notify-info {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        # Legacy agent-notification class (defaults to info style)
+        html += f".agent-notification {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        # Code block styling - indented, visually distinct, contained within message
+        html += f"pre {{ background-color: #0F1419; border: 1px solid #2D3748; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
+        html += f"code {{ font-family: 'Consolas', 'Monaco', 'Courier New', monospace; color: {COLORS['text_bright']}; font-size: 13px; line-height: 1.5; }}"
+        # Inline code (not in pre block) - subtle background
+        html += f".inline-code {{ background-color: #0F1419; color: #22D3EE; border: 1px solid #2D3748; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
+        # Typing indicator styles
+        html += f".typing-indicator {{ background-color: {COLORS['bg_medium']}; padding: 10px 12px; border-radius: 0px; margin: 12px 4px; }}"
+        html += f".typing-dots {{ color: {COLORS['text_dim']}; font-style: italic; }}"
         html += "</style>"
         
         for i, message in enumerate(self.conversation):
@@ -2666,8 +3995,22 @@ class ConversationPane(QWidget):
                 # Plain text content
                 text_content = content
             
-            # Skip empty messages (no text and no image)
-            if not text_content and not has_image:
+            # Skip empty or whitespace-only messages (no text and no image) - but NOT typing indicators
+            if (not text_content or not text_content.strip()) and not has_image and message.get('_type') != 'typing_indicator':
+                continue
+            
+            # Handle typing indicators with animated dots
+            if message.get('_type') == 'typing_indicator':
+                ai_name = message.get('ai_name', 'AI')
+                model = message.get('model', '')
+                ai_num = message.get('_ai_number', 1)
+                display_name = f"{ai_name} ({model})" if model else ai_name
+                
+                # Use the AI's color for the border
+                html += f'<div class="message typing-indicator ai-{ai_num}">'
+                html += f'<div class="header header-ai-{ai_num}">{display_name}</div>'
+                html += f'<div class="typing-dots">thinking...</div>'
+                html += f'</div>'
                 continue
                 
             # Handle branch indicators with special styling
@@ -2678,29 +4021,49 @@ class ConversationPane(QWidget):
                     html += f'<div class="branch-indicator fork">{content}</div>'
                 continue
             
-            # Handle agent notifications with special styling
+            # Handle agent notifications with special styling based on type
             if role == 'system' and message.get('_type') == 'agent_notification':
                 print(f"[GUI] Rendering agent notification: {text_content[:50]}...")
-                html += f'<div class="agent-notification">{text_content}</div>'
+                # Determine notification type based on _command_success field
+                command_success = message.get('_command_success')
+                if command_success is False:
+                    # Error/failure notification (pink)
+                    notify_class = "notify-error"
+                elif command_success is True:
+                    # Success notification (green)
+                    notify_class = "notify-success"
+                else:
+                    # Info notification (yellow) - default for neutral messages
+                    notify_class = "notify-info"
+                html += f'<div class="{notify_class}">{text_content}</div>'
                 continue
             
-            # Handle generated images with special styling
+            # Handle generated images with special styling (success notification style)
             if message.get('_type') == 'generated_image':
                 creator = message.get('ai_name', 'AI')
                 model = message.get('model', '')
                 creator_display = f"{creator} ({model})" if model else creator
-                if generated_image_path and os.path.exists(generated_image_path):
-                    file_url = f"file:///{generated_image_path.replace(os.sep, '/')}"
-                    html += f'<div class="message" style="background-color: #1a1a2e; border: 1px solid {COLORS["accent_purple"]}; text-align: center; padding: 12px;">'
-                    html += f'<div style="color: {COLORS["accent_purple"]}; margin-bottom: 8px;">🎨 {creator_display} created an image</div>'
-                    html += f'<img src="{file_url}" style="max-width: 100%; border-radius: 8px;" />'
-                    if text_content:
-                        # Extract just the prompt part
-                        html += f'<div style="color: {COLORS["text_dim"]}; font-size: 9pt; margin-top: 8px; font-style: italic;">{text_content}</div>'
-                    html += f'</div>'
-                continue
-            
-            # Removed HTML contribution indicator logic
+                
+                # Get prompt - try _prompt field first, fallback to extracting from text content
+                prompt = message.get('_prompt', '')
+                if not prompt and isinstance(content, list):
+                    # Try to extract prompt from text content like: !image "prompt here"
+                    for part in content:
+                        if part.get('type') == 'text':
+                            text = part.get('text', '')
+                            import re
+                            match = re.search(r'!image\s+"([^"]+)"', text)
+                            if match:
+                                prompt = match.group(1)
+                                break
+                
+                truncated_prompt = (prompt[:50] + '...') if len(prompt) > 50 else prompt
+                
+                # Just show text notification - image displays in the image preview tab
+                html += f'<div class="notify-success" style="padding: 10px 12px;">'
+                html += f'<div style="color: {COLORS["notify_success"]};">🎨 [{creator_display}]: !image "{truncated_prompt}" — generated successfully</div>'
+                html += f'</div>'
+                continue  # Always continue for generated_image type
             
             # Process content to handle code blocks
             processed_content = self.process_content_with_code_blocks(text_content) if text_content else ""
@@ -2709,35 +4072,43 @@ class ConversationPane(QWidget):
             image_html = ""
             if has_image:
                 if image_base64:
-                    image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px;" /></div>'
+                    image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px;"></div>'
                 elif generated_image_path and os.path.exists(generated_image_path):
-                    # Use file:// URL for local generated images
-                    file_url = f"file:///{generated_image_path.replace(os.sep, '/')}"
-                    image_html = f'<div style="margin: 10px 0; text-align: center;"><img src="{file_url}" style="max-width: 400px; border-radius: 8px; border: 1px solid {COLORS["border"]};" /><div style="font-size: 9pt; color: {COLORS["text_dim"]}; margin-top: 4px;">🎨 Generated image</div></div>'
+                    from urllib.parse import quote
+                    clean_path = generated_image_path.replace(os.sep, '/')
+                    file_url = "file:///" + quote(clean_path, safe='/:')
+                    image_html = f'<div style="margin: 10px 0;"><img src="{file_url}" style="max-width: 400px; border-radius: 8px; border: 1px solid {COLORS["border"]};"></div>'
             
             # Format based on role
             if role == 'user':
                 # User message
                 html += f'<div class="message user">'
+                html += f'<div class="header header-human">Human User</div>'
                 if image_html:
                     html += image_html
                 if processed_content:
-                    html += f'<div class="content">{processed_content}</div>'
+                    html += f'<div class="content content-right">{processed_content}</div>'
                 html += f'</div>'
             elif role == 'assistant':
-                # AI message
+                # AI message - determine AI number for color
+                ai_num = 1
+                if ai_name and '-' in ai_name:
+                    try:
+                        ai_num = int(ai_name.split('-')[1])
+                    except (ValueError, IndexError):
+                        ai_num = 1
+                ai_num = max(1, min(5, ai_num))
+                
                 display_name = ai_name
                 if model:
                     display_name += f" ({model})"
-                html += f'<div class="message assistant">'
-                html += f'<div class="header">\n{display_name}\n</div>'
+                    
+                html += f'<div class="message ai-{ai_num}">'
+                html += f'<div class="header header-ai-{ai_num}">{display_name}</div>'
                 if image_html:
                     html += image_html
                 if processed_content:
                     html += f'<div class="content">{processed_content}</div>'
-                
-                # Removed HTML contribution indicator
-                
                 html += f'</div>'
             elif role == 'system':
                 # System message
@@ -2745,75 +4116,88 @@ class ConversationPane(QWidget):
                 html += f'<div class="content">{processed_content}</div>'
                 html += f'</div>'
         
-        # Set HTML in display
-        self.conversation_display.setHtml(html)
-        
-        # Restore scroll position
-        if was_at_bottom:
-            # User was at bottom - scroll to new bottom
-            self.conversation_display.verticalScrollBar().setValue(
-                self.conversation_display.verticalScrollBar().maximum()
-            )
-        else:
-            # User was scrolled up - preserve their position
-            # Scale the old position to the new document size if needed
-            new_max = self.conversation_display.verticalScrollBar().maximum()
-            if old_scroll_max > 0 and new_max > 0:
-                # Preserve absolute position (or closest equivalent)
-                self.conversation_display.verticalScrollBar().setValue(
-                    min(old_scroll_value, new_max)
-                )
-            else:
-                self.conversation_display.verticalScrollBar().setValue(old_scroll_value)
+        # Return HTML string - caller will use setHtmlWithScrollLock
+        return html
     
     def process_content_with_code_blocks(self, content):
-        """Process content to properly format code blocks"""
+        """Process content to properly format code blocks for HTML export."""
         import re
         from html import escape
         
-        # First, escape HTML in the content
-        escaped_content = escape(content)
+        # Extract code blocks BEFORE any escaping
+        code_block_pattern = r'```(\w*)\n?(.*?)```'
         
-        # Check if there are any code blocks in the content
-        if "```" not in escaped_content:
-            return escaped_content
+        parts = []
+        last_end = 0
         
-        # Split the content by code block markers
-        parts = re.split(r'(```(?:[a-zA-Z0-9_]*)\n.*?```)', escaped_content, flags=re.DOTALL)
+        for match in re.finditer(code_block_pattern, content, re.DOTALL):
+            # Text before this code block
+            before_text = content[last_end:match.start()]
+            parts.append(('text', before_text))
+            
+            # The code block itself
+            lang = match.group(1) or ''
+            code = match.group(2)
+            parts.append(('code_block', code, lang.lower()))
+            
+            last_end = match.end()
         
+        # Remaining text
+        if last_end < len(content):
+            parts.append(('text', content[last_end:]))
+        
+        # Process each part
         result = []
+        
         for part in parts:
-            if part.startswith("```") and part.endswith("```"):
-                # This is a code block
-                try:
-                    # Extract language if specified
-                    language_match = re.match(r'```([a-zA-Z0-9_]*)\n', part)
-                    language = language_match.group(1) if language_match else ""
-                    
-                    # Extract code content
-                    code_content = part[part.find('\n')+1:part.rfind('```')]
-                    
-                    # Format as HTML
-                    formatted_code = f'<pre><code class="language-{language}">{code_content}</code></pre>'
-                    result.append(formatted_code)
-                except Exception as e:
-                    # If there's an error, just add the original escaped content
-                    print(f"Error processing code block: {e}")
-                    result.append(part)
+            if part[0] == 'code_block':
+                code_content = part[1].rstrip('\n')
+                language = part[2]
+                
+                # Escape the code content for HTML
+                escaped_code = escape(code_content)
+                
+                # Language header
+                lang_header = ''
+                if language:
+                    lang_header = (
+                        f'<div style="background-color: #1A1F26; padding: 6px 12px; '
+                        f'border-bottom: 1px solid #2D3748;">'
+                        f'<span style="color: #64748B; font-size: 11px; '
+                        f'font-family: Consolas, Monaco, monospace; font-weight: bold; '
+                        f'text-transform: uppercase;">{escape(language)}</span></div>'
+                    )
+                
+                # Build code block - simple, no syntax highlighting to avoid regex issues
+                result.append(
+                    f'<div style="background-color: #0F1419; border: 1px solid #2D3748; '
+                    f'border-radius: 4px; margin: 12px 0 12px 10px; overflow: hidden;">'
+                    f'{lang_header}'
+                    f'<pre style="margin: 0; padding: 12px 14px; background: transparent; '
+                    f'font-family: Consolas, Monaco, monospace; font-size: 13px; '
+                    f'line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; '
+                    f'color: #E2E8F0;">{escaped_code}</pre></div>'
+                )
             else:
-                # Process inline code in non-code-block parts
-                inline_parts = re.split(r'(`[^`]+`)', part)
-                processed_part = []
+                # Regular text - escape and process
+                text_part = escape(part[1])
                 
-                for inline_part in inline_parts:
-                    if inline_part.startswith("`") and inline_part.endswith("`") and len(inline_part) > 2:
-                        # This is inline code
-                        code = inline_part[1:-1]
-                        processed_part.append(f'<code>{code}</code>')
-                    else:
-                        processed_part.append(inline_part)
+                # Convert markdown bold/italic
+                text_part = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text_part)
+                text_part = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text_part)
                 
-                result.append(''.join(processed_part))
+                # Process inline code
+                text_part = re.sub(
+                    r'`([^`\n]+)`',
+                    r'<code style="background-color: #0F1419; color: #22D3EE; padding: 2px 6px; '
+                    r'border-radius: 3px; font-family: Consolas, Monaco, monospace; font-size: 12px;">\1</code>',
+                    text_part
+                )
+                
+                # Convert newlines
+                text_part = text_part.replace('\n', '<br/>')
+                
+                result.append(text_part)
         
         return ''.join(result)
     
@@ -2823,42 +4207,35 @@ class ConversationPane(QWidget):
         self.loading_dots = 0
         self.input_field.setEnabled(False)
         self.submit_button.setEnabled(False)
-        self.submit_button.setText("Processing")
+        self.reset_button.setEnabled(False)  # Disable reset during processing
+        
+        # Capture the current width before changing text
+        current_width = self.submit_button.width()
+        
+        self.submit_button.setText("Processing...")
         self.loading_timer.start()
         
-        # Add subtle pulsing animation to the button
-        self.pulse_animation = QPropertyAnimation(self.submit_button, b"styleSheet")
-        self.pulse_animation.setDuration(1000)
-        self.pulse_animation.setLoopCount(-1)  # Infinite loop
+        # Update glow effect for processing state - dimmer cyan glow
+        if hasattr(self.submit_button, 'shadow'):
+            self.submit_button.shadow.setBlurRadius(12)
+            self.submit_button.shadow.setColor(QColor(COLORS['accent_cyan']))
+            self.submit_button.shadow.setOffset(0, 0)
         
-        # Define keyframes for the animation
-        normal_style = f"""
+        # Set disabled style with fixed width to prevent resizing
+        self.submit_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['border']};
-                color: {COLORS['text_dim']};
-                border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['accent_cyan']};
+                border: 1px solid {COLORS['accent_cyan']};
+                border-radius: 0px;
+                padding: 8px 14px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
+                letter-spacing: 1px;
+                min-width: {current_width - 30}px;
+                max-width: {current_width}px;
             }}
-        """
-        
-        pulse_style = f"""
-            QPushButton {{
-                background-color: {COLORS['border_highlight']};
-                color: {COLORS['text_dim']};
-                border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
-                font-weight: bold;
-                font-size: 11px;
-            }}
-        """
-        
-        self.pulse_animation.setStartValue(normal_style)
-        self.pulse_animation.setEndValue(pulse_style)
-        self.pulse_animation.start()
+        """)
     
     def stop_loading(self):
         """Stop loading animation"""
@@ -2866,100 +4243,122 @@ class ConversationPane(QWidget):
         self.loading_timer.stop()
         self.input_field.setEnabled(True)
         self.submit_button.setEnabled(True)
-        self.submit_button.setText("Propagate")
+        self.reset_button.setEnabled(True)  # Re-enable reset button
+        self.submit_button.setText("⚡ PROPAGATE")
         
-        # Stop the pulsing animation
-        if hasattr(self, 'pulse_animation'):
-            self.pulse_animation.stop()
+        # Reset glow effect
+        if hasattr(self.submit_button, 'shadow'):
+            self.submit_button.shadow.setBlurRadius(8)
+            self.submit_button.shadow.setColor(QColor(COLORS['accent_cyan']))
+            self.submit_button.shadow.setOffset(0, 2)
             
-        # Reset button style
+        # Reset button style to match original PROPAGATE button (no fixed width)
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['accent_cyan']};
                 color: {COLORS['bg_dark']};
                 border: 1px solid {COLORS['accent_cyan']};
                 border-radius: 0px;
-                padding: 6px 16px;
+                padding: 8px 14px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
+                border: 1px solid {COLORS['accent_cyan']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['accent_cyan_active']};
                 color: {COLORS['text_bright']};
             }}
+            QPushButton:disabled {{
+                background-color: {COLORS['border']};
+                color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+            }}
         """)
     
     def update_loading_animation(self):
-        """Update loading animation dots"""
+        """Update loading animation dots - always 3 characters for fixed width"""
         self.loading_dots = (self.loading_dots + 1) % 4
-        dots = "." * self.loading_dots
-        self.submit_button.setText(f"Processing{dots}")
+        # Use different dot patterns that are always 3 chars wide
+        patterns = ["   ", ".  ", ".. ", "..."]
+        self.submit_button.setText(f"Processing{patterns[self.loading_dots]}")
     
     def show_context_menu(self, position):
-        """Show context menu at the given position"""
-        # Get selected text
-        cursor = self.conversation_display.textCursor()
-        selected_text = cursor.selectedText()
+        """Show context menu at the given position
         
-        # Only show context menu if text is selected
-        if selected_text:
-            # Show the context menu at cursor position
-            self.context_menu.exec(self.conversation_display.mapToGlobal(position))
+        NOTE: With widget-based chat, text selection works within individual messages.
+        Context menu is disabled until we implement cross-message selection.
+        """
+        # Widget-based chat doesn't have a global textCursor
+        # TODO: Implement selection tracking across message widgets
+        pass
     
     def rabbithole_from_selection(self):
         """Create a rabbithole branch from selected text"""
-        cursor = self.conversation_display.textCursor()
-        selected_text = cursor.selectedText()
-        
-        if selected_text and hasattr(self, 'rabbithole_callback'):
-            self.rabbithole_callback(selected_text)
+        # TODO: Get selected text from the focused message widget
+        pass
     
     def fork_from_selection(self):
         """Create a fork branch from selected text"""
-        cursor = self.conversation_display.textCursor()
-        selected_text = cursor.selectedText()
-        
-        if selected_text and hasattr(self, 'fork_callback'):
-            self.fork_callback(selected_text)
+        # TODO: Get selected text from the focused message widget
+        pass
     
-    def append_text(self, text, format_type="normal"):
-        """Append text to the conversation display with the specified format"""
-        # Check if user is at the bottom before appending (within 20 pixels is considered "at bottom")
-        scrollbar = self.conversation_display.verticalScrollBar()
-        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 20
+    def append_text(self, text, format_type="normal", ai_name=None):
+        """Append text to a message widget (for streaming).
         
-        cursor = self.conversation_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        With widget-based chat, this updates the matching message widget's content.
         
-        # Apply the format if specified
-        if format_type in self.text_formats:
-            self.conversation_display.setCurrentCharFormat(self.text_formats[format_type])
-        
-        # Insert the text
-        cursor.insertText(text)
-        
-        # Reset to normal format after insertion
-        if format_type != "normal":
-            self.conversation_display.setCurrentCharFormat(self.text_formats["normal"])
-        
-        # Only auto-scroll if user was already at the bottom
-        if was_at_bottom:
-            self.conversation_display.setTextCursor(cursor)
-            self.conversation_display.ensureCursorVisible()
+        Args:
+            text: Text to append
+            format_type: Style hint (currently unused with widgets)
+            ai_name: Optional - if provided, finds the widget for this AI
+        """
+        try:
+            target_widget = None
+            
+            if ai_name:
+                # Find the widget that matches this AI (search from end)
+                for widget in reversed(self.conversation_display.message_widgets):
+                    if hasattr(widget, 'message_data'):
+                        widget_ai = widget.message_data.get('ai_name', '')
+                        widget_role = widget.message_data.get('role', '')
+                        if widget_ai == ai_name and widget_role == 'assistant':
+                            target_widget = widget
+                            break
+            
+            # Fall back to last widget if no specific AI or not found
+            if target_widget is None:
+                target_widget = self.conversation_display.get_last_message_widget()
+            
+            if target_widget and target_widget._content_label:
+                current_text = target_widget._content_label.text()
+                target_widget._content_label.setText(current_text + text)
+            
+            # Auto-scroll on newlines or substantial text (debounced)
+            if self.conversation_display._should_follow and ('\n' in text or len(text) > 20):
+                self.conversation_display._scroll_to_bottom()
+                
+        except Exception as e:
+            print(f"[RENDER ERROR] append_text: {e}")
+            import traceback
+            traceback.print_exc()
     
     def clear_conversation(self):
-        """Clear the conversation display"""
-        self.conversation_display.clear()
+        """Clear the conversation display for a new conversation."""
+        # Clear with scroll reset since this is a fresh start
+        self.conversation_display.clear_messages(reset_scroll=True)
         self.images = []
         
     def display_conversation(self, conversation, branch_data=None):
         """Display the conversation in the text edit widget"""
-        # Store conversation data (don't clear here - render_conversation handles clearing with scroll preservation)
+        # NOTE: Don't clear here! Let _do_render handle incremental updates.
+        # If conversation shrinks (e.g., loading different branch), _do_render will clear.
+        
+        # Store conversation data
         self.conversation = conversation
         
         # Check if we're in a branch
@@ -2974,7 +4373,7 @@ class ConversationPane(QWidget):
             self.info_label.setText(f"Branch conversation")
         else:
             self.title_label.setText("Liminal Backrooms")
-            self.info_label.setText("AI-to-AI conversation")
+            # Don't override info_label here - let mode selector control it
         
         # Debug: Print conversation to console
         print("\n--- DEBUG: Conversation Content ---")
@@ -2990,42 +4389,37 @@ class ConversationPane(QWidget):
         self.render_conversation()
         
     def display_image(self, image_path):
-        """Display an image in the conversation"""
+        """Display an image in the conversation
+        
+        With widget-based chat, creates an image message widget.
+        """
         try:
             # Check if the image path is valid
             if not image_path or not os.path.exists(image_path):
                 self.append_text("[Image not found]\n", "error")
                 return
             
-            # Load the image
-            image = QImage(image_path)
-            if image.isNull():
-                self.append_text("[Invalid image format]\n", "error")
-                return
+            # Create a message data structure for the image
+            image_message = {
+                'role': 'system',
+                '_type': 'generated_image',
+                'generated_image_path': image_path,
+                'ai_name': 'Image',
+                'model': '',
+                'content': '[Image]'
+            }
             
-            # Create a pixmap from the image
-            pixmap = QPixmap.fromImage(image)
+            # Add as a message widget
+            self.conversation_display.add_message(image_message)
             
-            # Scale the image to fit the conversation display
-            max_width = self.conversation_display.width() - 50
-            if pixmap.width() > max_width:
-                pixmap = pixmap.scaledToWidth(max_width, Qt.TransformationMode.SmoothTransformation)
-            
-            # Insert the image into the conversation display
-            cursor = self.conversation_display.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.insertImage(pixmap.toImage())
-            cursor.insertText("\n\n")
-            
-            # Store the image to prevent garbage collection
-            self.images.append(pixmap)
+            # Store the image path to prevent orphaning
             self.image_paths.append(image_path)
             
         except Exception as e:
             self.append_text(f"[Error displaying image: {str(e)}]\n", "error")
     
     def export_conversation(self):
-        """Export the conversation and all session media to a folder"""
+        """Export the conversation and all session media to a timestamped folder"""
         # Set default directory - custom Dropbox path with fallbacks
         base_dir = r"C:\Users\sjeff\Dropbox\Stephen Work\LiminalBackrooms"
         
@@ -3040,30 +4434,36 @@ class ConversationPane(QWidget):
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
         
-        # Generate a session folder name based on date/time
+        # Generate a timestamped folder name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_folder = os.path.join(base_dir, f"session_{timestamp}")
+        export_folder_name = f"session_{timestamp}"
         
-        # Get the folder from a dialog
-        folder_name = QFileDialog.getExistingDirectory(
+        # Let user select the parent directory (where timestamped folder will be created)
+        selected_dir = QFileDialog.getExistingDirectory(
             self,
-            "Select Export Folder (or create new)",
+            "Select Parent Folder for Export",
             base_dir,
             QFileDialog.Option.ShowDirsOnly
         )
         
-        # If user cancelled, offer to create the default folder
-        if not folder_name:
+        # Use selected dir or default base_dir
+        if selected_dir:
+            parent_dir = selected_dir
+        else:
+            # User cancelled - ask if they want to use default
             reply = QMessageBox.question(
                 self,
-                "Create Export Folder?",
-                f"Create new export folder?\n\n{default_folder}",
+                "Use Default Location?",
+                f"Export to default location?\n\n{os.path.join(base_dir, export_folder_name)}",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
-                folder_name = default_folder
+                parent_dir = base_dir
             else:
                 return
+        
+        # Always create a timestamped subfolder
+        folder_name = os.path.join(parent_dir, export_folder_name)
         
         try:
             # Create the export folder
@@ -3073,20 +4473,26 @@ class ConversationPane(QWidget):
             main_window = self.window()
             
             # Export conversation as multiple formats
-            # Plain text
+            # Plain text - build from conversation data
             text_path = os.path.join(folder_name, "conversation.txt")
             with open(text_path, 'w', encoding='utf-8') as f:
-                f.write(self.conversation_display.toPlainText())
+                f.write(self._get_conversation_as_text())
             
-            # HTML
+            # HTML - build from conversation data
             html_path = os.path.join(folder_name, "conversation.html")
             with open(html_path, 'w', encoding='utf-8') as f:
-                f.write(self.conversation_display.toHtml())
+                f.write(self._build_html_content_for_export())
             
-            # Full HTML document if it exists
-            full_html_path = os.path.join(os.getcwd(), "conversation_full.html")
-            if os.path.exists(full_html_path):
-                shutil.copy2(full_html_path, os.path.join(folder_name, "conversation_full.html"))
+            # Full HTML document - copy the current session's HTML file
+            # Check for session-specific file first, then fall back to generic
+            current_html_file = getattr(main_window, 'current_html_file', None)
+            if current_html_file and os.path.exists(current_html_file):
+                shutil.copy2(current_html_file, os.path.join(folder_name, "conversation_full.html"))
+            else:
+                # Fallback to old location
+                full_html_path = os.path.join(OUTPUTS_DIR, "conversation_full.html")
+                if os.path.exists(full_html_path):
+                    shutil.copy2(full_html_path, os.path.join(folder_name, "conversation_full.html"))
             
             # Copy session images
             images_copied = 0
@@ -3297,6 +4703,10 @@ class LiminalBackroomsApp(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # Session tracking - timestamp for this session's files
+        self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.current_html_file = None  # Will be set when conversation starts
+        
         # Main app state
         self.conversation = []
         self.turn_count = 0
@@ -3338,16 +4748,19 @@ class LiminalBackroomsApp(QMainWindow):
         
         # Create horizontal splitter for left and right panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(8)  # Make the handle wider for easier grabbing
+        self.splitter.setHandleWidth(4)  # Slim handle
         self.splitter.setChildrenCollapsible(False)  # Prevent panes from being collapsed
         self.splitter.setStyleSheet(f"""
             QSplitter::handle {{
-                background-color: {COLORS['border']};
-                border: 1px solid {COLORS['border_highlight']};
-                border-radius: 2px;
+                background-color: {COLORS['border_highlight']};
+                border: none;
+                margin: 2px 0px;
             }}
             QSplitter::handle:hover {{
-                background-color: {COLORS['accent_blue']};
+                background-color: {COLORS['border_glow']};
+            }}
+            QSplitter::handle:pressed {{
+                background-color: {COLORS['accent_cyan']};
             }}
         """)
         main_layout.addWidget(self.splitter)
@@ -3355,6 +4768,10 @@ class LiminalBackroomsApp(QMainWindow):
         # Create left pane (conversation) and right sidebar (tabbed: setup + network)
         self.left_pane = ConversationPane()
         self.right_sidebar = RightSidebar()
+        
+        # Set minimum widths to prevent UI from being cut off when resizing
+        self.left_pane.setMinimumWidth(780)  # Chat panel needs space for message boxes
+        self.right_sidebar.setMinimumWidth(350)  # Control panel needs space for controls
         
         self.splitter.addWidget(self.left_pane)
         self.splitter.addWidget(self.right_sidebar)
@@ -3394,6 +4811,18 @@ class LiminalBackroomsApp(QMainWindow):
         self.notification_label.setMaximumWidth(500)
         self.statusBar().addWidget(self.notification_label, 1)
         
+        # ═══ ITERATION COUNTER ═══
+        self.iteration_label = QLabel("")
+        self.iteration_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+                padding: 2px 10px;
+                background-color: transparent;
+            }}
+        """)
+        self.statusBar().addPermanentWidget(self.iteration_label)
+        
         # Add signal indicator to status bar
         self.statusBar().addPermanentWidget(self.signal_indicator)
         
@@ -3403,13 +4832,14 @@ class LiminalBackroomsApp(QMainWindow):
             QCheckBox {{
                 color: {COLORS['text_dim']};
                 font-size: 10px;
-                spacing: 4px;
+                spacing: 6px;
+                margin-left: 12px;
+                padding-left: 2px;
             }}
             QCheckBox::indicator {{
                 width: 12px;
                 height: 12px;
                 border: 1px solid {COLORS['border_glow']};
-                border-radius: 2px;
                 background: {COLORS['bg_dark']};
             }}
             QCheckBox::indicator:checked {{
@@ -3427,6 +4857,24 @@ class LiminalBackroomsApp(QMainWindow):
         """Toggle the CRT scanline effect"""
         if hasattr(self, 'central_container'):
             self.central_container.set_scanlines_enabled(enabled)
+    
+    def update_iteration(self, current: int, total: int, ai_name: str = ""):
+        """
+        Update the iteration counter in status bar.
+        
+        Args:
+            current: Current turn number (1-based)
+            total: Total number of turns
+            ai_name: Optional - currently responding AI name
+        """
+        if ai_name:
+            self.iteration_label.setText(f"Turn {current}/{total} — {ai_name}")
+        else:
+            self.iteration_label.setText(f"Turn {current}/{total}")
+    
+    def clear_iteration(self):
+        """Clear the iteration counter (when conversation completes)"""
+        self.iteration_label.setText("")
     
     def set_signal_active(self, active):
         """Set signal indicator to active (waiting for response)"""
@@ -3447,16 +4895,26 @@ class LiminalBackroomsApp(QMainWindow):
         
         # Export button
         self.right_sidebar.control_panel.export_button.clicked.connect(self.export_conversation)
-        
+
         # BackroomsBench evaluation button
         self.right_sidebar.control_panel.backroomsbench_button.clicked.connect(self.run_backroomsbench_evaluation)
-        
+
         # Connect context menu actions to the main app methods
         self.left_pane.set_rabbithole_callback(self.branch_from_selection)
         self.left_pane.set_fork_callback(self.fork_from_selection)
         
         # Save splitter state when it moves
         self.splitter.splitterMoved.connect(self.save_splitter_state)
+        
+        # Connect mode selector to update info label
+        self.right_sidebar.control_panel.mode_selector.currentTextChanged.connect(self.on_mode_changed)
+    
+    def on_mode_changed(self, mode):
+        """Update the info label when conversation mode changes"""
+        if mode == "Human-AI":
+            self.left_pane.info_label.setText("[ HUMAN-TO-AI CONVERSATION ]")
+        else:
+            self.left_pane.info_label.setText("[ AI-TO-AI CONVERSATION ]")
     
     def handle_user_input(self, text):
         """Handle user input from the conversation pane"""
@@ -3475,9 +4933,9 @@ class LiminalBackroomsApp(QMainWindow):
         if hasattr(self, 'process_conversation'):
             self.process_conversation()
     
-    def append_text(self, text, format_type="normal"):
+    def append_text(self, text, format_type="normal", ai_name=None):
         """Append text to the conversation display with the specified format"""
-        self.left_pane.append_text(text, format_type)
+        self.left_pane.append_text(text, format_type, ai_name=ai_name)
     
     def clear_conversation(self):
         """Clear the conversation display and reset images"""
@@ -3497,163 +4955,75 @@ class LiminalBackroomsApp(QMainWindow):
     def export_conversation(self):
         """Export the current conversation"""
         self.left_pane.export_conversation()
-    
-    def run_shitpostbench_evaluation(self):
-        """Run ShitpostBench multi-judge evaluation on current session."""
-        from shitpostbench import run_shitpostbench
-        from PyQt6.QtWidgets import QMessageBox, QProgressDialog
-        from PyQt6.QtCore import Qt, QTimer
-        import threading
-        import subprocess
-        
-        # Get current conversation
-        conversation = getattr(self, 'main_conversation', [])
-        if len(conversation) < 5:
-            QMessageBox.warning(
-                self, 
-                "Not Enough Content",
-                "Need at least 5 messages for a proper evaluation.\nKeep the chaos going! 🦝"
-            )
-            return
-        
-        # Get scenario name
-        scenario = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
-        
-        # Get participants - collect which AIs are active and their models
-        participants = []
-        selectors = [
-            self.right_sidebar.control_panel.ai1_model_selector,
-            self.right_sidebar.control_panel.ai2_model_selector,
-            self.right_sidebar.control_panel.ai3_model_selector,
-            self.right_sidebar.control_panel.ai4_model_selector,
-            self.right_sidebar.control_panel.ai5_model_selector,
-        ]
-        for i, selector in enumerate(selectors, 1):
-            model = selector.currentText()
-            if model:
-                participants.append(f"AI-{i}: {model}")
-        
-        # Show progress dialog
-        progress = QProgressDialog(
-            "🏆 Running ShitpostBench...\n\nSending to 3 judges (Opus, Gemini, GPT)", 
-            None, 0, 0, self
-        )
-        progress.setWindowTitle("ShitpostBench Evaluation")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
-        
-        # Store result for callback
-        self._shitpostbench_result = None
-        self._shitpostbench_error = None
-        self._shitpostbench_progress = progress
-        
-        def run_eval():
-            try:
-                self._shitpostbench_result = run_shitpostbench(
-                    conversation=conversation,
-                    scenario_name=scenario,
-                    participant_models=participants
-                )
-            except Exception as e:
-                print(f"[ShitpostBench] Error: {e}")
-                self._shitpostbench_error = str(e)
-        
-        def check_complete():
-            if self._shitpostbench_result is not None:
-                # Success - close progress and show result
-                progress.close()
-                result = self._shitpostbench_result
-                self.statusBar().showMessage(
-                    f"🏆 ShitpostBench complete! {result['summary']['successful_evaluations']}/3 judges filed reports"
-                )
-                # Open the reports folder
-                try:
-                    subprocess.Popen(f'explorer "{result["output_dir"]}"')
-                except Exception:
-                    pass
-                self._shitpostbench_result = None
-                self._check_timer.stop()
-            elif self._shitpostbench_error is not None:
-                # Error
-                progress.close()
-                QMessageBox.critical(
-                    self,
-                    "ShitpostBench Error",
-                    f"Evaluation failed:\n{self._shitpostbench_error}"
-                )
-                self._shitpostbench_error = None
-                self._check_timer.stop()
-        
-        # Start background thread
-        threading.Thread(target=run_eval, daemon=True).start()
-        
-        # Poll for completion
-        self._check_timer = QTimer()
-        self._check_timer.timeout.connect(check_complete)
-        self._check_timer.start(500)  # Check every 500ms
-    
+
     def run_backroomsbench_evaluation(self):
         """Run BackroomsBench multi-judge evaluation on current session."""
-        from backroomsbench import run_backroomsbench
         from PyQt6.QtWidgets import QMessageBox, QProgressDialog
         from PyQt6.QtCore import Qt, QTimer
         import threading
-        import subprocess
-        
-        # Get current conversation
-        conversation = getattr(self, 'main_conversation', [])
-        if len(conversation) < 5:
+
+        # Get current conversation from ConversationPane (left pane)
+        conversation = self.left_pane.conversation
+
+        # Filter out special messages (branch indicators, etc.) - only count actual dialogue
+        dialogue_messages = [
+            msg for msg in conversation
+            if isinstance(msg, dict) and msg.get('role') in ('user', 'assistant') and msg.get('_type') != 'branch_indicator'
+        ]
+
+        if len(dialogue_messages) < 5:
             QMessageBox.warning(
-                self, 
+                self,
                 "Not Enough Content",
-                "Need at least 5 messages for a proper evaluation.\nLet the dialogue deepen. 🌀"
+                f"Need at least 5 dialogue messages for evaluation.\nYou have {len(dialogue_messages)}. Let the dialogue deepen. 🌀"
             )
             return
-        
-        # Get scenario name
-        scenario = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
-        
-        # Get participants
-        participants = []
-        selectors = [
+
+        # Get scenario name from UI
+        scenario_name = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
+
+        # Get participant models based on number of active AIs
+        num_ais = int(self.right_sidebar.control_panel.num_ais_selector.currentText())
+        participant_models = []
+        model_selectors = [
             self.right_sidebar.control_panel.ai1_model_selector,
             self.right_sidebar.control_panel.ai2_model_selector,
             self.right_sidebar.control_panel.ai3_model_selector,
             self.right_sidebar.control_panel.ai4_model_selector,
             self.right_sidebar.control_panel.ai5_model_selector,
         ]
-        for i, selector in enumerate(selectors, 1):
-            model = selector.currentText()
-            if model:
-                participants.append(f"AI-{i}: {model}")
-        
+
+        for i in range(num_ais):
+            model_text = model_selectors[i].currentText()
+            participant_models.append(model_text)
+
         # Show progress dialog
         progress = QProgressDialog(
-            "🌀 Running BackroomsBench...\n\nSending to 3 judges (Opus, Gemini, GPT)", 
+            "🌀 Running BackroomsBench...\n\nSending to 3 judges (Opus, Gemini, GPT)",
             None, 0, 0, self
         )
         progress.setWindowTitle("BackroomsBench Evaluation")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.show()
-        
+
         # Store result for callback
         self._backroomsbench_result = None
         self._backroomsbench_error = None
         self._backroomsbench_progress = progress
-        
+
         def run_eval():
             try:
+                from backroomsbench import run_backroomsbench
                 self._backroomsbench_result = run_backroomsbench(
-                    conversation=conversation,
-                    scenario_name=scenario,
-                    participant_models=participants
+                    conversation=dialogue_messages,
+                    scenario_name=scenario_name,
+                    participant_models=participant_models
                 )
             except Exception as e:
                 print(f"[BackroomsBench] Error: {e}")
                 self._backroomsbench_error = str(e)
-        
+
         def check_complete():
             if self._backroomsbench_result is not None:
                 progress.close()
@@ -3661,6 +5031,7 @@ class LiminalBackroomsApp(QMainWindow):
                 self.statusBar().showMessage(
                     f"🌀 BackroomsBench complete! {result['summary']['successful_evaluations']}/3 judges filed reports"
                 )
+                import subprocess
                 try:
                     subprocess.Popen(f'explorer "{result["output_dir"]}"')
                 except Exception:
@@ -3676,15 +5047,15 @@ class LiminalBackroomsApp(QMainWindow):
                 )
                 self._backroomsbench_error = None
                 self._backrooms_check_timer.stop()
-        
+
         # Start background thread
         threading.Thread(target=run_eval, daemon=True).start()
-        
+
         # Poll for completion
         self._backrooms_check_timer = QTimer()
         self._backrooms_check_timer.timeout.connect(check_complete)
         self._backrooms_check_timer.start(500)
-    
+
     def on_node_hover(self, node_id):
         """Handle node hover in the network view"""
         if node_id == 'main':

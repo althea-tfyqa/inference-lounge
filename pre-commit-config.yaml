@@ -1,0 +1,21 @@
+# .pre-commit-config.yaml
+#
+# Pre-commit hooks for Liminal Backrooms
+#
+# Setup (one-time):
+#   poetry add --group dev pre-commit
+#   poetry run pre-commit install
+#
+# Then hooks run automatically on every commit.
+# To run manually: poetry run pre-commit run --all-files
+
+repos:
+  # Local hooks (no external dependencies)
+  - repo: local
+    hooks:
+      - id: no-developer-tools
+        name: Check DEVELOPER_TOOLS is disabled
+        entry: python tools/check_developer_tools.py
+        language: system
+        files: ^config\.py$
+        pass_filenames: false

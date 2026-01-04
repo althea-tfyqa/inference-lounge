@@ -6,14 +6,18 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #0a0a0f;
-            --bg-card: #12121a;
-            --border: #2a2a3a;
-            --text: #e8e8f0;
-            --text-dim: #8888a0;
-            --accent: #00ffd0;
-            --accent-purple: #b388ff;
-            --accent-gold: #ffd700;
+            --bg-dark: #0A0E1A;
+            --bg-medium: #111827;
+            --bg-light: #1E293B;
+            --border: #1E293B;
+            --border-glow: #06B6D4;
+            --text: #CBD5E1;
+            --text-dim: #64748B;
+            --text-bright: #F1F5F9;
+            --accent: #06B6D4;
+            --accent-cyan: #06B6D4;
+            --accent-purple: #A855F7;
+            --accent-gold: #FBBF24;
         }
         * { box-sizing: border-box; }
         body {
@@ -44,14 +48,14 @@
             align-items: center;
             gap: 12px;
             padding: 16px 20px;
-            background: var(--bg-card);
+            background: var(--bg-medium);
             border: 1px solid var(--border);
             border-radius: 12px 12px 0 0;
             cursor: pointer;
             transition: all 0.2s ease;
         }
         .folder-header:hover {
-            border-color: var(--accent);
+            border-color: var(--border-glow);
         }
         .folder-header.collapsed {
             border-radius: 12px;
@@ -93,7 +97,7 @@
         /* Conversation list */
         .conversation-list { list-style: none; padding: 0; margin: 0; }
         .conversation-list li {
-            background: var(--bg-card);
+            background: var(--bg-medium);
             border-bottom: 1px solid var(--border);
             transition: all 0.2s ease;
         }
@@ -114,7 +118,7 @@
         
         /* ShitpostBench specific */
         .shitpostbench .folder-header {
-            background: linear-gradient(135deg, #12121a 0%, #1a1520 100%);
+            background: linear-gradient(135deg, var(--bg-medium) 0%, #1a1520 100%);
         }
         .shitpostbench .folder-title {
             color: var(--accent-gold);
@@ -161,7 +165,7 @@
             <div class="folder-header" onclick="toggleFolder(this)">
                 <span class="folder-icon">🏆</span>
                 <span class="folder-title">ShitpostBench</span>
-                <span class="folder-count">Elo Leaderboard + Reports</span>
+                <span class="folder-count">14 models • 5 sessions</span>
                 <span class="folder-toggle">▼</span>
             </div>
             <div class="folder-content">
@@ -173,17 +177,37 @@
                     </div>
                 </a>
                 <ul class="conversation-list">
-                    <!-- Add ShitpostBench session reports here -->
-                    <!-- Example:
                     <li>
-                        <a href="shitpostbench/session_20251201_130125.html">
-                            <div class="title">Session: "503 Error: The Gang Breaks OpenRouter"</div>
-                            <div class="date">December 1, 2025</div>
+                        <a href="../backroomsbench_reports/session_20251205_024414">
+                            <div class="title">Session: Claude Sonnet vs Opus vs Haiku</div>
+                            <div class="date">December 5, 2025 • 02:44 AM</div>
                         </a>
                     </li>
-                    -->
+                    <li>
+                        <a href="../backroomsbench_reports/session_20251205_022603">
+                            <div class="title">Session: LongCat vs Claude 3 Haiku vs Mistral</div>
+                            <div class="date">December 5, 2025 • 02:26 AM</div>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="../backroomsbench_reports/session_20251203_130218">
+                            <div class="title">Session: Gemini vs DeepSeek vs Claude Opus vs Kimi vs Grok</div>
+                            <div class="date">December 3, 2025 • 01:02 PM</div>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="../backroomsbench_reports/session_20251201_214901">
+                            <div class="title">Session: GPT 5.1 vs Gemini vs Claude Opus vs DeepSeek vs Grok</div>
+                            <div class="date">December 1, 2025 • 09:49 PM</div>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="../backroomsbench_reports/session_20251201_202613">
+                            <div class="title">Session: DeepSeek vs Claude Opus vs Claude 3 Opus vs Gemini vs GPT-5 Preview</div>
+                            <div class="date">December 1, 2025 • 08:26 PM</div>
+                        </a>
+                    </li>
                 </ul>
-                <div class="empty-state">Drop session report links here</div>
             </div>
         </div>
         
