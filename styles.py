@@ -1,6 +1,6 @@
 # styles.py
 """
-Centralized styling for the Liminal Backrooms application.
+Centralized styling for the Inference Lounge application.
 
 This module is the SINGLE SOURCE OF TRUTH for all colors, fonts, and widget styles.
 Import from here - never hardcode colors or duplicate style definitions.

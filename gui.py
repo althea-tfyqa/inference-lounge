@@ -1,6 +1,6 @@
 # gui.py
 """
-Main GUI module for Liminal Backrooms application.
+Main GUI module for Inference Lounge application.
 
 All styling is imported from styles.py - the single source of truth for colors/fonts.
 """
@@ -38,6 +38,9 @@ from config import (
 
 # Import centralized styling - single source of truth for colors and widget styles
 from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
+
+# Import scenario editor dialog
+from scenario_editor_dialog import ScenarioEditorDialog
 
 # Import shared utilities - with fallback for open_html_in_browser
 from shared_utils import generate_image_from_text
@@ -2968,9 +2971,16 @@ class ControlPanel(QWidget):
         scenario_label = QLabel("▸ SCENARIO")
         scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         controls_layout.addWidget(scenario_label)
-        
+
         controls_layout.addWidget(prompt_container)
-        
+
+        # Edit Scenarios button
+        self.edit_scenarios_btn = QPushButton("Edit Scenarios")
+        self.edit_scenarios_btn.setStyleSheet(get_button_style(COLORS['accent_purple']))
+        self.edit_scenarios_btn.setToolTip("Create, edit, rename, and delete conversation scenarios")
+        self.edit_scenarios_btn.clicked.connect(self.open_scenario_editor)
+        controls_layout.addWidget(self.edit_scenarios_btn)
+
         # Divider
         divider3 = QLabel("─" * 20)
         divider3.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
@@ -3129,6 +3139,27 @@ class ControlPanel(QWidget):
             traceback.print_exc()
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", f"Error opening HTML file:\n{e}")
+
+    def open_scenario_editor(self):
+        """Open the scenario editor dialog"""
+        dialog = ScenarioEditorDialog(self)
+        result = dialog.exec()
+
+        # If user saved changes (dialog.accept() was called)
+        if result == dialog.DialogCode.Accepted:
+            # Refresh the scenario dropdown to show updated list
+            # Note: This doesn't reload the scenarios from config.py - user must restart app for that
+            # But we can at least show a helpful message
+            QMessageBox.information(
+                self,
+                "Restart Required",
+                "Scenarios saved successfully!\n\n"
+                "Restart the application to use the updated scenarios."
+            )
+
+            # Optional: Refresh the dropdown list (won't have new content until restart, but shows something changed)
+            # This would require reloading SYSTEM_PROMPT_PAIRS from config
+            # For now, we keep it simple and just show the restart message
 
 class ConversationContextMenu(QMenu):
     """Context menu for the conversation display"""
@@ -4372,7 +4403,7 @@ class ConversationPane(QWidget):
             self.title_label.setText(f"{branch_emoji} {branch_type.capitalize()}: {selected_text[:30]}...")
             self.info_label.setText(f"Branch conversation")
         else:
-            self.title_label.setText("Liminal Backrooms")
+            self.title_label.setText("Inference Lounge")
             # Don't override info_label here - let mode selector control it
         
         # Debug: Print conversation to console
@@ -4521,7 +4552,7 @@ class ConversationPane(QWidget):
             # Create a manifest/summary file
             manifest_path = os.path.join(folder_name, "manifest.txt")
             with open(manifest_path, 'w', encoding='utf-8') as f:
-                f.write(f"Liminal Backrooms Session Export\n")
+                f.write(f"Inference Lounge Session Export\n")
                 f.write(f"================================\n")
                 f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 f.write(f"Contents:\n")

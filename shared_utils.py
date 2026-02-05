@@ -33,8 +33,9 @@ load_dotenv()
 # Initialize Anthropic client with API key
 anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# Initialize OpenAI client (optional - only needed for Sora video generation)
+openai_api_key = os.getenv('OPENAI_API_KEY')
+openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
 def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callback=None, temperature=1.0):
     """Call the Claude API with the given messages and prompt

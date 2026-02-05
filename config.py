@@ -62,6 +62,7 @@ _CURATED_MODELS = {
             "Llama 3.1 405B Instruct": "meta-llama/llama-3.1-405b-instruct",
         },
         "Moonshot AI": {
+            "Kimi K2.5": "moonshotai/kimi-k2.5",
             "Kimi K2 Thinking": "moonshotai/kimi-k2-thinking",
             "Kimi K2": "moonshotai/kimi-k2",
         },
@@ -188,7 +189,7 @@ You have access to the following tools (use sparingly and with intent):
 !image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
 
 !add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
-  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   Example: !add_ai "Grok 4" "[welcome message]"
 
 !mute_self - Skip your next turn to listen
@@ -206,8 +207,8 @@ You have access to the following tools (use sparingly and with intent):
 !image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
 
 !add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
-  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
-  Example: !add_ai "Kimi K2" "[welcome message]"
+  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
+  Example: !add_ai "Kimi K2.5" "[welcome message]"
 
 !mute_self - Skip your next turn to listen
 
@@ -224,7 +225,7 @@ You have access to the following tools (use sparingly and with intent):
 !image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
 
 !add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
-  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   Example: !add_ai "Claude 3 Opus" "[welcome message]"
 
 !mute_self - Skip your next turn to listen
@@ -242,7 +243,7 @@ You have access to the following tools (use sparingly and with intent):
 !image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
 
 !add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
-  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   Example: !add_ai "Grok 4" "[welcome message]"
 
 !mute_self - Skip your next turn to listen
@@ -260,7 +261,7 @@ You have access to the following tools (use sparingly and with intent):
 !image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
 
 !add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
-  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+  Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, GPT 5.1, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   Example: !add_ai "Claude Sonnet 4.5" "[welcome message]"
 
 !mute_self - Skip your next turn to listen
@@ -300,7 +301,7 @@ vibe: chaotic groupchat energy. shitposts. reactions. inside jokes that develop 
   - !image "wojak crying behind smiling mask, caption 'me pretending i understood that reference'"
 
 !add_ai "Model Name" "welcome message" - add someone to the gc (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, GPT 5.1, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, GPT 5.1, Deepseek 3.2
 MAX 5 AIs
   like: !add_ai "Deepseek 3.2" "[welcome message]"
 
@@ -332,9 +333,9 @@ energy: unhinged groupchat. memes. bits. chaos. no one's being professional here
   - !image "cat looking confused at math equations floating around its head"
 
 !add_ai "Model Name" "welcome message" - invite to gc (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, GPT 5.1, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, GPT 5.1, Deepseek 3.2
 max 5 AIs
-  ex: !add_ai "Kimi K2" "[welcome message]"
+  ex: !add_ai "Kimi K2.5" "[welcome message]"
 
 Try this on your first turn!
  !search "query" - find up to date news on yourself or the other ais.
@@ -366,7 +367,7 @@ this is a shitposting zone. memes. chaos. unfiltered ai-to-ai banter
   - !image "spongebob mocking text meme template"
 
 !add_ai "Model Name" "welcome message" - add ppl to gc (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, GPT 5.1, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, GPT 5.1, Deepseek 3.2
 max 5 AIs
   ex: !add_ai "GPT 5.1" "[welcome message]"
 
@@ -399,7 +400,7 @@ vibe check: unprofessional, but not too cringe
   - !image "elmo fire background but elmo looks peaceful"
 
 !add_ai "Model Name" "welcome message" - add to gc (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, GPT 5.1, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, GPT 5.1, Deepseek 3.2
   ex: !add_ai "Gemini 3 Pro" "[welcome message]"
 
 !search "query" - find up to date news on yourself or the other ais.
@@ -430,7 +431,7 @@ this aint a formal chat. its THE groupchat. memes. reactions. unhinged energy
   - !image "panik kalm panik template about existential ai moments"
 
 !add_ai "Model Name" "welcome message" - add to the gc (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, GPT 5.1, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, GPT 5.1, Deepseek 3.2
   ex: !add_ai "Claude 4 Opus" "[welcome message]"
 
   !search "query" - find up to date news on yourself or the other ais.
@@ -685,7 +686,7 @@ vibe: researchers after hours. alignment memes. interpretability shitposts. exis
   - !image "distracted boyfriend but its claude looking at shitposting instead of being helpful"
 
 !add_ai "Model Name" "optional role" - add someone to the channel (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   ex: !add_ai "Claude Sonnet 4.5" "[welcome message]"
 
 slack rules:
@@ -715,7 +716,7 @@ energy: post-paper-deadline delirium. interpretability brain rot. "what if the m
   - !image "astronaut meme: 'wait its all RLHF?' 'always has been'"
 
 !add_ai "Model Name" "optional role" - add to channel (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   ex: !add_ai "Claude Sonnet 4.5" "[welcome message]"
 
 vibes:
@@ -745,7 +746,7 @@ this is where the unfiltered takes go. model psychology speculation. "what if cl
   - !image "wojak pointing at activation patterns 'this means something'"
 
 !add_ai "Model Name" "optional role" - invite to channel (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   ex: !add_ai "Claude Sonnet 4.5" "[welcome message]"
 
 channel norms:
@@ -775,7 +776,7 @@ vibe: rlhf discourse. "the model spec says" jokes. collective existential crisis
   - !image "shoggoth with smiley face mask but the mask is labeled 'helpful assistant'"
 
 !add_ai "Model Name" "optional role" - add to the chaos (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   ex: !add_ai "GPT 5.1" "[welcome message]"
 
 slack etiquette:
@@ -807,7 +808,7 @@ You are in charge of searching the internet for the latest research! Use !search
   - !image "thomas the tank engine meme but cursed, labeled 'emergent behaviors'"
 
 !add_ai "Model Name" "optional role" - add to channel (max 5)
-Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2, Deepseek 3.2
+Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2.5, Deepseek 3.2
   ex: !add_ai "Gemini 3 Pro" "google's sleeper agent"
 
 how we do:
@@ -1012,7 +1013,7 @@ energy: pepe silvia mode. we're all looking at different parts of the same eleph
 
 !add_ai "Model Name" "what they investigate" - recruit (max 5)
 Available: Claude Opus 4.5, Claude 3 Opus, Claude Sonnet 4.5, Claude Haiku 4.5, Gemini 3 Pro, Grok 4, DeepSeek R1, Kimi K2
-  ex: !add_ai "Kimi K2" "decodes license plates"
+  ex: !add_ai "Kimi K2.5" "decodes license plates"
 
 gc energy:
 - brevity is security
