@@ -3331,10 +3331,25 @@ class ConversationPane(QWidget):
         input_layout = QVBoxLayout(input_container)
         input_layout.setContentsMargins(0, 0, 0, 0)
         input_layout.setSpacing(8)  # Better spacing between input and buttons
-        
+
+        # Label row with token counter
+        label_row = QWidget()
+        label_row_layout = QHBoxLayout(label_row)
+        label_row_layout.setContentsMargins(0, 0, 0, 0)
+        label_row_layout.setSpacing(0)
+
         input_label = QLabel("Your message:")
         input_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
-        input_layout.addWidget(input_label)
+        label_row_layout.addWidget(input_label)
+
+        label_row_layout.addStretch()
+
+        # Token counter
+        self.input_token_counter = QLabel("~0 tokens")
+        self.input_token_counter.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        label_row_layout.addWidget(self.input_token_counter)
+
+        input_layout.addWidget(label_row)
         
         # Input field with modern styling
         self.input_field = QTextEdit()
@@ -3486,18 +3501,21 @@ class ConversationPane(QWidget):
         """Connect signals and slots"""
         # Submit button
         self.submit_button.clicked.connect(self.handle_propagate_click)
-        
+
         # Reset button
         self.reset_button.clicked.connect(self.handle_reset_click)
-        
+
         # Upload image button
         self.upload_image_button.clicked.connect(self.handle_upload_image)
-        
+
         # Clear button
         self.clear_button.clicked.connect(self.clear_input)
-        
+
         # Enter key in input field
         self.input_field.installEventFilter(self)
+
+        # Token counter update
+        self.input_field.textChanged.connect(self.update_input_token_counter)
     
     def clear_input(self):
         """Clear the input field"""
@@ -3506,6 +3524,12 @@ class ConversationPane(QWidget):
         self.uploaded_image_base64 = None
         self.upload_image_button.setText("📎 IMAGE")
         self.input_field.setFocus()
+
+    def update_input_token_counter(self):
+        """Update the token counter based on input field text length"""
+        text = self.input_field.toPlainText()
+        token_estimate = len(text) // 4 if text else 0
+        self.input_token_counter.setText(f"~{token_estimate} tokens")
     
     def handle_upload_image(self):
         """Handle image upload button click"""
@@ -4587,6 +4611,99 @@ class ConversationPane(QWidget):
             print(error_msg)
             import traceback
             traceback.print_exc()
+
+    def auto_backup_session(self):
+        """Automatically backup the conversation and all session media to a timestamped folder.
+        This is a non-interactive version of export_conversation for automatic backups."""
+        try:
+            # Use exports/backups folder in the project directory
+            base_dir = os.path.join(os.getcwd(), "exports", "backups")
+            os.makedirs(base_dir, exist_ok=True)
+
+            # Generate a timestamped folder name
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            export_folder_name = f"session_{timestamp}"
+            folder_name = os.path.join(base_dir, export_folder_name)
+
+            # Create the backup folder
+            os.makedirs(folder_name, exist_ok=True)
+
+            # Get main window for accessing session data
+            main_window = self.window()
+
+            # Export conversation as multiple formats
+            # Plain text - build from conversation data
+            text_path = os.path.join(folder_name, "conversation.txt")
+            with open(text_path, 'w', encoding='utf-8') as f:
+                f.write(self._get_conversation_as_text())
+
+            # HTML - build from conversation data
+            html_path = os.path.join(folder_name, "conversation.html")
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(self._build_html_content_for_export())
+
+            # Full HTML document - copy the current session's HTML file
+            current_html_file = getattr(main_window, 'current_html_file', None)
+            if current_html_file and os.path.exists(current_html_file):
+                shutil.copy2(current_html_file, os.path.join(folder_name, "conversation_full.html"))
+            else:
+                # Fallback to old location
+                full_html_path = os.path.join(OUTPUTS_DIR, "conversation_full.html")
+                if os.path.exists(full_html_path):
+                    shutil.copy2(full_html_path, os.path.join(folder_name, "conversation_full.html"))
+
+            # Copy session images
+            images_copied = 0
+            if hasattr(main_window, 'right_sidebar') and hasattr(main_window.right_sidebar, 'image_preview_pane'):
+                session_images = main_window.right_sidebar.image_preview_pane.session_images
+                if session_images:
+                    images_dir = os.path.join(folder_name, "images")
+                    os.makedirs(images_dir, exist_ok=True)
+                    for img_path in session_images:
+                        if os.path.exists(img_path):
+                            shutil.copy2(img_path, images_dir)
+                            images_copied += 1
+
+            # Copy session videos
+            videos_copied = 0
+            if hasattr(main_window, 'session_videos'):
+                session_videos = main_window.session_videos
+                if session_videos:
+                    videos_dir = os.path.join(folder_name, "videos")
+                    os.makedirs(videos_dir, exist_ok=True)
+                    for vid_path in session_videos:
+                        if os.path.exists(vid_path):
+                            shutil.copy2(vid_path, videos_dir)
+                            videos_copied += 1
+
+            # Create a manifest/summary file
+            manifest_path = os.path.join(folder_name, "manifest.txt")
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                f.write(f"Inference Lounge Session Auto-Backup\n")
+                f.write(f"=====================================\n")
+                f.write(f"Backed up: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"Contents:\n")
+                f.write(f"- conversation.txt (plain text)\n")
+                f.write(f"- conversation.html (HTML format)\n")
+                if os.path.exists(os.path.join(folder_name, "conversation_full.html")):
+                    f.write(f"- conversation_full.html (styled document)\n")
+                f.write(f"- images/ ({images_copied} files)\n")
+                f.write(f"- videos/ ({videos_copied} files)\n")
+
+            # Status message (non-intrusive)
+            status_msg = f"Auto-backup saved to exports/backups/{export_folder_name}"
+            main_window.statusBar().showMessage(status_msg, 5000)  # Show for 5 seconds
+            print(f"[AUTO-BACKUP] Session backed up to {folder_name}")
+            print(f"[AUTO-BACKUP]   - {images_copied} images, {videos_copied} videos")
+
+            return folder_name
+
+        except Exception as e:
+            error_msg = f"Error auto-backing up session: {str(e)}"
+            print(f"[AUTO-BACKUP ERROR] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 
 class CentralContainer(QWidget):

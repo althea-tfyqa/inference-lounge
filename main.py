@@ -1379,6 +1379,9 @@ class ConversationManager:
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
+                # Auto-backup the session
+                print(f"BRANCH: Auto-backing up session after round completion...")
+                self.app.left_pane.auto_backup_session()
         else:
             # Main conversation
             print(f"MAIN: Turn {self.app.turn_count} of {max_iterations} completed")
@@ -1398,6 +1401,9 @@ class ConversationManager:
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
+                # Auto-backup the session
+                print(f"MAIN: Auto-backing up session after round completion...")
+                self.app.left_pane.auto_backup_session()
     
     def handle_progress(self, message):
         """Handle progress update from worker"""

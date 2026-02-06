@@ -159,10 +159,16 @@ class ScenarioEditorDialog(QDialog):
 
         # AI prompt editors (5 slots)
         self.prompt_editors = {}
+        self.token_counters = {}
         for i in range(1, 6):
             ai_slot = f"AI-{i}"
 
-            # Label
+            # Label row with token counter
+            label_row = QWidget()
+            label_row_layout = QHBoxLayout(label_row)
+            label_row_layout.setContentsMargins(0, 0, 0, 0)
+            label_row_layout.setSpacing(0)
+
             label = QLabel(f"{ai_slot} Prompt:")
             label.setStyleSheet(f"""
                 QLabel {{
@@ -171,7 +177,22 @@ class ScenarioEditorDialog(QDialog):
                     font-size: 12px;
                 }}
             """)
-            layout.addWidget(label)
+            label_row_layout.addWidget(label)
+
+            label_row_layout.addStretch()
+
+            # Token counter
+            token_counter = QLabel("~0 tokens")
+            token_counter.setStyleSheet(f"""
+                QLabel {{
+                    color: {COLORS['text_dim']};
+                    font-size: 10px;
+                }}
+            """)
+            label_row_layout.addWidget(token_counter)
+            self.token_counters[ai_slot] = token_counter
+
+            layout.addWidget(label_row)
 
             # Editor
             editor = QPlainTextEdit()
@@ -193,6 +214,7 @@ class ScenarioEditorDialog(QDialog):
             editor.setPlaceholderText(f"Enter system prompt for {ai_slot}...")
             editor.setMinimumHeight(80)
             editor.textChanged.connect(self._on_field_changed)
+            editor.textChanged.connect(lambda ai=ai_slot: self._update_token_counter(ai))
 
             self.prompt_editors[ai_slot] = editor
             layout.addWidget(editor)
@@ -273,17 +295,30 @@ class ScenarioEditorDialog(QDialog):
             editor.blockSignals(True)
             editor.setPlainText(prompts.get(ai_slot, ""))
             editor.blockSignals(False)
+            # Update token counter after loading
+            self._update_token_counter(ai_slot)
 
     def _clear_editor(self):
         """Clear all editor fields."""
         self.current_scenario_name = None
         self.name_field.clear()
-        for editor in self.prompt_editors.values():
+        for ai_slot, editor in self.prompt_editors.items():
             editor.clear()
+            # Reset token counter
+            self._update_token_counter(ai_slot)
 
     def _on_field_changed(self):
         """Handle field changes (marks as modified)."""
         self.modified = True
+
+    def _update_token_counter(self, ai_slot: str):
+        """Update the token counter for a specific AI slot."""
+        editor = self.prompt_editors.get(ai_slot)
+        counter = self.token_counters.get(ai_slot)
+        if editor and counter:
+            text = editor.toPlainText()
+            token_estimate = len(text) // 4 if text else 0
+            counter.setText(f"~{token_estimate} tokens")
 
     def _get_current_editor_data(self) -> tuple:
         """
