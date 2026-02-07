@@ -34,11 +34,15 @@ from config import (
     STARTING_PROMPTS,
     SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
     OUTPUTS_DIR,
-    DEVELOPER_TOOLS
+    DEVELOPER_TOOLS,
+    get_display_name,
+    get_model_id
 )
 
 # Import centralized styling - single source of truth for colors and widget styles
-from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
+from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style, get_bubble_color, get_portrait_path, COMIC_COLORS
+from thinking_bubble_widget import ThinkingBubbleWithLabel
+from portrait_column_widget import PortraitColumnWidget
 
 # Import scenario editor dialog and settings dialog
 from scenario_editor_dialog import ScenarioEditorDialog
@@ -232,14 +236,37 @@ class MessageWidget(QFrame):
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
-        
+
         # Name label (left)
         name_label = QLabel(name_text)
         name_label.setStyleSheet(f"background-color: transparent; color: {color}; font-weight: bold; font-size: 9pt;")
         header_layout.addWidget(name_label)
-        
+
         return header_widget
-    
+
+    def _create_comic_nameplate(self, name_text):
+        """Create a comic book style nameplate with unified teal styling."""
+        from PyQt6.QtWidgets import QSizePolicy
+
+        nameplate = QLabel(f"★ {name_text.upper()} ★")
+        nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        nameplate.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COMIC_COLORS['teal']};
+                color: white;
+                font-weight: bold;
+                font-size: 11px;
+                letter-spacing: 1px;
+                padding: 4px 12px;
+                border: 2px solid {COMIC_COLORS['black']};
+                border-radius: 4px;
+            }}
+        """)
+        # Make it only as wide as its content
+        nameplate.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        nameplate.adjustSize()
+        return nameplate
+
     def _get_ai_color(self):
         """Get the color for this AI based on _ai_number or extracted from ai_name."""
         ai_num = self.message_data.get('_ai_number')
@@ -260,26 +287,27 @@ class MessageWidget(QFrame):
         return self.AI_COLORS.get(ai_num, self.AI_COLORS[1])
     
     def _setup_typing_indicator(self):
-        """Setup typing indicator style."""
+        """Setup thinking bubble animation with comic book style."""
         ai_name = self.message_data.get('ai_name', 'AI')
         model = self.message_data.get('model', '')
-        border_color = self._get_ai_color()
-        display_name = f"{ai_name} ({model})" if model else ai_name
-        
+
+        # Use comic bubble color for background
+        bubble_color = get_bubble_color(model or ai_name)
+
+        # Transparent background so thinking bubble shows on conversation background
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-left: 3px solid {border_color};
-                border-radius: 0px;
+                background-color: transparent;
+                border: none;
+                padding: 5px;
             }}
         """)
-        
-        header = self._create_header_widget(display_name, border_color)
-        self.layout().addWidget(header)
-        
-        dots = QLabel("thinking...")
-        dots.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-style: italic;")
-        self.layout().addWidget(dots)
+
+        # Create thinking bubble with nameplate
+        display_name = f"{ai_name} ({model})" if model else ai_name
+        thinking_bubble = ThinkingBubbleWithLabel(display_name, show_nameplate=True)
+        thinking_bubble.start()  # Start the animation
+        self.layout().addWidget(thinking_bubble)
     
     def _setup_branch_indicator(self, text):
         """Setup branch indicator style."""
@@ -431,22 +459,28 @@ class MessageWidget(QFrame):
             self.layout().addWidget(path_label)
     
     def _setup_user_message(self, text):
-        """Setup human user message style - left-aligned like AI messages."""
+        """Setup human user message style with comic book theme."""
+        # Get comic bubble color for human
+        bubble_color = get_bubble_color('human')
+
+        # Comic theme: rounded bubble with black border and white background
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-left: 3px solid {self.HUMAN_COLOR};
-                border-radius: 0px;
+                background-color: {bubble_color};
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 20px;
+                padding: 10px;
             }}
         """)
-        
-        header = self._create_header_widget("Human User", self.HUMAN_COLOR)
+
+        # Unified teal nameplate
+        header = self._create_comic_nameplate("You")
         self.layout().addWidget(header)
-        
+
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
         content = QLabel(formatted_text)
-        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setStyleSheet(f"background-color: transparent; color: {COMIC_COLORS['black']}; font-size: 14px;")
         content.setWordWrap(True)
         content.setTextFormat(Qt.TextFormat.RichText)
         content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -454,27 +488,32 @@ class MessageWidget(QFrame):
         self._content_label = content
     
     def _setup_assistant_message(self, text):
-        """Setup AI assistant message style."""
+        """Setup AI assistant message style with comic book theme."""
         ai_name = self.message_data.get('ai_name', 'AI')
         model = self.message_data.get('model', '')
-        border_color = self._get_ai_color()
-        
+
+        # Get comic bubble color based on model name
+        bubble_color = get_bubble_color(model or ai_name)
+
+        # Comic theme: rounded bubble with black border and colored background
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-left: 3px solid {border_color};
-                border-radius: 0px;
+                background-color: {bubble_color};
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 20px;
+                padding: 10px;
             }}
         """)
-        
+
+        # Unified teal nameplate for all speakers
         display_name = f"{ai_name} ({model})" if model else ai_name
-        header = self._create_header_widget(display_name, border_color)
+        header = self._create_comic_nameplate(display_name)
         self.layout().addWidget(header)
-        
+
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
         content = QLabel(formatted_text)
-        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setStyleSheet(f"background-color: transparent; color: {COMIC_COLORS['black']}; font-size: 14px;")
         content.setWordWrap(True)
         content.setTextFormat(Qt.TextFormat.RichText)
         content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -666,9 +705,9 @@ class ChatScrollArea(QScrollArea):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         # ─── Message Container ──────────────────────────────────────────────
-        # Messages are added to this container's layout
+        # Messages are added to this container's layout (comic theme: cream paper)
         self.container = QWidget()
-        self.container.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        self.container.setStyleSheet(f"background-color: {COMIC_COLORS['cream']};")
         self.message_layout = QVBoxLayout(self.container)
         self.message_layout.setContentsMargins(10, 10, 10, 10)
         self.message_layout.setSpacing(8)
@@ -681,11 +720,11 @@ class ChatScrollArea(QScrollArea):
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         
         # ─── Style ──────────────────────────────────────────────────────────
-        # Use standardized scrollbar style from styles.py
+        # Comic theme: cream paper background with texture
         self.setStyleSheet(f"""
             QScrollArea {{
-                background-color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['border_glow']};
+                background-color: {COMIC_COLORS['cream']};
+                border: 3px solid {COMIC_COLORS['black']};
                 border-radius: 0px;
             }}
             {get_scrollbar_style()}
@@ -2834,7 +2873,57 @@ class ConversationPane(QWidget):
         """)
         self.config_status_label.setWordWrap(True)
         layout.addWidget(self.config_status_label)
-        
+
+        # ====================================================================
+        # SETUP CONTROLS - Shown only when conversation is empty
+        # ====================================================================
+        self.setup_controls = QWidget()
+        setup_layout = QVBoxLayout(self.setup_controls)
+        setup_layout.setContentsMargins(0, 10, 0, 10)
+        setup_layout.setSpacing(8)
+
+        # Scenario selector
+        scenario_row = QHBoxLayout()
+        scenario_label = QLabel("Scenario:")
+        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        scenario_row.addWidget(scenario_label)
+
+        self.scenario_selector = NoScrollComboBox()
+        self.scenario_selector.addItems(sorted(SYSTEM_PROMPT_PAIRS.keys()))
+        self.scenario_selector.setStyleSheet(get_combobox_style())
+        scenario_row.addWidget(self.scenario_selector, 1)
+        setup_layout.addLayout(scenario_row)
+
+        # Number of AIs selector
+        num_ais_row = QHBoxLayout()
+        num_ais_label = QLabel("Number of AIs:")
+        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        num_ais_row.addWidget(num_ais_label)
+
+        self.num_ais_selector = NoScrollComboBox()
+        self.num_ais_selector.addItems(["2", "3", "4", "5"])
+        self.num_ais_selector.setCurrentText("3")  # Default
+        self.num_ais_selector.setStyleSheet(get_combobox_style())
+        num_ais_row.addWidget(self.num_ais_selector, 1)
+        setup_layout.addLayout(num_ais_row)
+
+        # AI model assignments container (will be populated dynamically)
+        self.ai_assignments_container = QWidget()
+        self.ai_assignments_layout = QVBoxLayout(self.ai_assignments_container)
+        self.ai_assignments_layout.setContentsMargins(0, 0, 0, 0)
+        self.ai_assignments_layout.setSpacing(8)
+        setup_layout.addWidget(self.ai_assignments_container)
+
+        # Store AI model selectors
+        self.ai_model_selectors = []
+
+        # Separator
+        separator = QLabel("─" * 80)
+        separator.setStyleSheet(f"color: {COMIC_COLORS['black']}; font-size: 8px;")
+        setup_layout.addWidget(separator)
+
+        layout.addWidget(self.setup_controls)
+
         # Conversation display (widget-based chat scroll area)
         # Each message is a separate widget - no setHtml() means no scroll jumping!
         self.conversation_display = ChatScrollArea()
@@ -3058,6 +3147,131 @@ class ConversationPane(QWidget):
 
         # Token counter update
         self.input_field.textChanged.connect(self.update_input_token_counter)
+
+        # Setup controls
+        if hasattr(self, 'num_ais_selector'):
+            self.num_ais_selector.currentTextChanged.connect(self._populate_ai_assignments)
+            self.num_ais_selector.currentTextChanged.connect(self._on_num_ais_changed)
+            # Initialize AI assignments for default number (3)
+            self._populate_ai_assignments()
+
+        if hasattr(self, 'scenario_selector'):
+            self.scenario_selector.currentTextChanged.connect(self._on_scenario_changed)
+
+    def _populate_ai_assignments(self):
+        """Populate AI model assignment dropdowns based on number of AIs selected"""
+        # Clear existing assignments
+        for i in reversed(range(self.ai_assignments_layout.count())):
+            widget = self.ai_assignments_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        self.ai_model_selectors = []
+
+        # Get number of AIs
+        num_ais = int(self.num_ais_selector.currentText())
+
+        # Flatten AI_MODELS to get all model display names
+        all_model_names = []
+        for tier_models in AI_MODELS.values():  # "Paid", "Free"
+            for provider_models in tier_models.values():  # "Anthropic", "OpenAI", etc.
+                all_model_names.extend(provider_models.keys())
+
+        # Create a selector for each AI
+        for i in range(1, num_ais + 1):
+            ai_row = QHBoxLayout()
+            ai_label = QLabel(f"AI-{i} model:")
+            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+            ai_row.addWidget(ai_label)
+
+            ai_model_selector = NoScrollComboBox()
+            ai_model_selector.addItems(sorted(all_model_names))
+            # Default to first model
+            if len(all_model_names) > 0:
+                ai_model_selector.setCurrentIndex(0)
+            ai_model_selector.setStyleSheet(get_combobox_style())
+            ai_row.addWidget(ai_model_selector, 1)
+
+            self.ai_assignments_layout.addLayout(ai_row)
+            self.ai_model_selectors.append(ai_model_selector)
+
+            # Connect each selector to update app settings
+            ai_model_selector.currentTextChanged.connect(
+                lambda text, index=i-1: self._on_ai_model_changed(index, text)
+            )
+
+    def _on_scenario_changed(self, scenario_name):
+        """Update app when scenario is changed"""
+        main_window = self.window()
+        if hasattr(main_window, 'current_scenario'):
+            main_window.current_scenario = scenario_name
+            # Update config status display
+            if hasattr(main_window, 'left_pane'):
+                main_window.left_pane.update_config_status(
+                    main_window.conversation_mode,
+                    main_window.current_scenario,
+                    main_window.max_iterations,
+                    main_window.num_ais
+                )
+
+    def _on_num_ais_changed(self, num_text):
+        """Update app when number of AIs is changed"""
+        main_window = self.window()
+        if hasattr(main_window, 'num_ais'):
+            main_window.num_ais = int(num_text)
+            # Update config status display
+            if hasattr(main_window, 'left_pane'):
+                main_window.left_pane.update_config_status(
+                    main_window.conversation_mode,
+                    main_window.current_scenario,
+                    main_window.max_iterations,
+                    main_window.num_ais
+                )
+
+    def _on_ai_model_changed(self, ai_index, display_name):
+        """Update app when an AI model assignment is changed"""
+        main_window = self.window()
+        if hasattr(main_window, 'ai_models'):
+            # Convert display name to model ID
+            model_id = get_model_id(display_name)
+            if model_id:
+                # Ensure ai_models list is long enough
+                while len(main_window.ai_models) <= ai_index:
+                    main_window.ai_models.append(list(AI_MODELS.values())[0])
+                main_window.ai_models[ai_index] = model_id
+                # Update config status display
+                if hasattr(main_window, 'left_pane'):
+                    main_window.left_pane.update_config_status(
+                        main_window.conversation_mode,
+                        main_window.current_scenario,
+                        main_window.max_iterations,
+                        main_window.num_ais
+                    )
+
+    def sync_setup_controls(self):
+        """Sync setup controls with app settings"""
+        main_window = self.window()
+
+        # Scenario
+        if hasattr(self, 'scenario_selector') and hasattr(main_window, 'current_scenario'):
+            index = self.scenario_selector.findText(main_window.current_scenario)
+            if index >= 0:
+                self.scenario_selector.setCurrentIndex(index)
+
+        # Number of AIs
+        if hasattr(self, 'num_ais_selector') and hasattr(main_window, 'num_ais'):
+            self.num_ais_selector.setCurrentText(str(main_window.num_ais))
+
+        # AI model assignments (convert model IDs to display names)
+        if hasattr(main_window, 'ai_models'):
+            for i, model_id in enumerate(main_window.ai_models[:len(self.ai_model_selectors)]):
+                if i < len(self.ai_model_selectors):
+                    # Convert model_id to display name
+                    display_name = get_display_name(model_id)
+                    index = self.ai_model_selectors[i].findText(display_name)
+                    if index >= 0:
+                        self.ai_model_selectors[i].setCurrentIndex(index)
     
     def clear_input(self):
         """Clear the input field"""
@@ -3270,6 +3484,13 @@ class ConversationPane(QWidget):
         """Update conversation display"""
         self.conversation = conversation
         self.render_conversation()
+
+        # Hide setup controls once conversation starts
+        if hasattr(self, 'setup_controls'):
+            if len(conversation) > 0:
+                self.setup_controls.hide()
+            else:
+                self.setup_controls.show()
     
     def update_streaming_content(self, ai_name: str, new_content: str):
         """
@@ -4560,21 +4781,32 @@ class LiminalBackroomsApp(QMainWindow):
         """)
         main_layout.addWidget(self.splitter)
         
-        # Create left pane (conversation) and right sidebar (tabbed: setup + network)
+        # Create portrait column (left), conversation pane (center), and right sidebar
+        self.portrait_column = PortraitColumnWidget()
         self.left_pane = ConversationPane()
         self.right_sidebar = RightSidebar()
-        
+
         # Set minimum widths to prevent UI from being cut off when resizing
-        self.left_pane.setMinimumWidth(780)  # Chat panel needs space for message boxes
-        self.right_sidebar.setMinimumWidth(350)  # Control panel needs space for controls
-        
+        self.portrait_column.setMinimumWidth(120)  # Portrait column is narrower
+        self.portrait_column.setMaximumWidth(120)  # Keep it fixed
+        self.left_pane.setMinimumWidth(600)  # Chat panel needs space for message boxes
+        self.right_sidebar.setMinimumWidth(0)  # Right sidebar is hidden
+
+        self.splitter.addWidget(self.portrait_column)
         self.splitter.addWidget(self.left_pane)
         self.splitter.addWidget(self.right_sidebar)
-        
-        # Set initial splitter sizes (85:15 ratio - maximum space for inference lounge)
+
+        # Hide right sidebar to maximize conversation space
+        # (User doesn't use GRAPH, IMAGES, or VIDEOS features)
+        self.right_sidebar.hide()
+
+        # Set initial splitter sizes (portrait column gets 120px, rest goes to conversation)
         total_width = 1600  # Based on default window width
-        self.splitter.setSizes([int(total_width * 0.85), int(total_width * 0.15)])
-        
+        self.splitter.setSizes([120, total_width - 120, 0])
+
+        # Sync setup controls with current app settings
+        self.left_pane.sync_setup_controls()
+
         # Initialize main conversation as root node
         self.right_sidebar.add_node('main', 'Seed', 'main')
         

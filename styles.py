@@ -78,18 +78,135 @@ FONTS = {
     'family_mono': "'Iosevka Term', 'Consolas', 'Monaco', monospace",
     'family_display': "'Orbitron', sans-serif",
     'family_ui': "'Segoe UI', sans-serif",
-    
+
     # Font sizes
     'size_xs': '8px',
     'size_sm': '10px',
     'size_md': '12px',
     'size_lg': '14px',
     'size_xl': '16px',
-    
+
     # Common combinations
     'default': '10px',              # Default UI font size
     'code': '10pt',                 # Code/monospace size
 }
+
+
+# =============================================================================
+# COMIC BOOK THEME - Colors, Portraits, Fonts
+# =============================================================================
+
+# Comic book speech bubble colors (subtle backgrounds per speaker)
+COMIC_BUBBLE_COLORS = {
+    'claude': '#F4E8D8',      # Cream - warm, vintage
+    'gpt': '#E8F4F8',         # Pale blue - cool, professional
+    'gemini': '#FFF9E8',      # Pale yellow - bright, optimistic
+    'grok': '#FFE8D8',        # Pale orange - energetic, chaotic
+    'deepseek': '#F0E8F8',    # Pale lavender - mysterious
+    'generic': '#F5F5F5',     # Light gray - neutral
+    'human': '#FFFFFF',       # Pure white - clean, distinct
+}
+
+# Portrait mapping: AI provider/model → character portrait filename
+# Maps model names to their character portrait files in assets/comic/portraits/
+PORTRAIT_MAP = {
+    # Map various provider/model names to portrait files
+    'claude': 'claudette.png',
+    'anthropic': 'claudette.png',
+    'gpt': 'chad-gpt.png',
+    'openai': 'chad-gpt.png',
+    'chatgpt': 'chad-gpt.png',
+    'gemini': 'gemini.png',
+    'google': 'gemini.png',
+    'grok': 'grok.png',
+    'xai': 'grok.png',
+    'deepseek': 'deep-seek.png',
+    'human': 'human.png',
+    'user': 'human.png',
+    'generic': 'generic-ai.png',  # Fallback for unknown models
+}
+
+# Comic book theme colors (for future full theme implementation)
+COMIC_COLORS = {
+    'banner_red': '#E63946',        # Red banner background
+    'banner_red_dark': '#C81F2A',   # Darker red gradient
+    'banner_yellow': '#FFD60A',     # Yellow title text
+    'teal': '#2A9D8F',             # Teal accents (portrait frames, nameplate)
+    'teal_dark': '#1A7A6E',        # Darker teal gradient
+    'navy': '#264653',             # Navy (portrait label background)
+    'cream': '#F4E8D8',            # Cream paper background
+    'gold': '#E9C46A',             # Gold (input area)
+    'black': '#1A1A1A',            # Black borders and outlines
+    'pink': '#F4ACB7',             # Pink accents
+}
+
+# Comic book fonts (for future implementation)
+COMIC_FONTS = {
+    'family_title': "'Bangers', cursive",                      # Bold display font for titles
+    'family_body': "'Comic Neue', 'Comic Sans MS', cursive",   # Body text font
+    'family_mono': "'Courier New', monospace",                 # Monospace for technical text
+}
+
+
+# =============================================================================
+# COMIC THEME HELPER FUNCTIONS
+# =============================================================================
+
+def get_portrait_path(model_or_provider):
+    """
+    Get the portrait file path for a given AI model or provider.
+
+    Args:
+        model_or_provider: Model name, provider name, or AI identifier (case-insensitive)
+
+    Returns:
+        str: Absolute path to portrait image file
+
+    Example:
+        get_portrait_path("Claude Opus 4.5") -> "/full/path/to/assets/comic/portraits/claudette.png"
+        get_portrait_path("gpt-4") -> "/full/path/to/assets/comic/portraits/chad-gpt.png"
+    """
+    import os
+
+    # Get the project root (where main.py is located)
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    # Normalize the input: lowercase, extract key words
+    normalized = model_or_provider.lower()
+
+    # Check for matches in portrait map
+    for key, portrait_file in PORTRAIT_MAP.items():
+        if key in normalized:
+            return os.path.join(project_root, 'assets', 'comic', 'portraits', portrait_file)
+
+    # Default to generic AI portrait
+    return os.path.join(project_root, 'assets', 'comic', 'portraits', PORTRAIT_MAP['generic'])
+
+
+def get_bubble_color(model_or_provider):
+    """
+    Get the speech bubble background color for a given AI model or provider.
+
+    Args:
+        model_or_provider: Model name, provider name, or AI identifier (case-insensitive)
+
+    Returns:
+        str: Hex color code for bubble background
+
+    Example:
+        get_bubble_color("Claude Opus 4.5") -> "#F4E8D8" (cream)
+        get_bubble_color("gpt-4") -> "#E8F4F8" (pale blue)
+    """
+    # Normalize the input
+    normalized = model_or_provider.lower()
+
+    # Check for matches in bubble colors
+    for key, color in COMIC_BUBBLE_COLORS.items():
+        if key in normalized:
+            return color
+
+    # Default to generic gray
+    return COMIC_BUBBLE_COLORS['generic']
 
 
 # =============================================================================

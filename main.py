@@ -1125,9 +1125,11 @@ class ConversationManager:
         if user_input is not None or not self.app.main_conversation:
             self.app.turn_count = 0
             print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations and {num_ais} AIs")
+            # Update portrait column with participants
+            self._update_portrait_column()
         else:
             print(f"MAIN: Continuing conversation - turn {self.app.turn_count+1} of {max_iterations}")
-        
+
         # Update iteration counter in status bar
         self.app.update_iteration(self.app.turn_count + 1, max_iterations)
         
@@ -1650,28 +1652,24 @@ class ConversationManager:
         # Extract AI number for styling
         ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
         
-        # Typing indicator disabled - simplifies rendering flow
-        # Status bar iteration counter now shows which AI is responding
-        return
-        
-        # --- OLD TYPING INDICATOR CODE (disabled) ---
-        # Create typing indicator message
+        # Create thinking bubble indicator message (re-enabled for comic theme!)
         typing_message = {
             "role": "assistant",
-            "content": "",  # Empty content - the render function will show the animation
+            "content": "",  # Empty content - the render function will show the thinking bubble
             "ai_name": ai_name,
             "model": model,
             "_type": "typing_indicator",
             "_ai_number": ai_number
         }
-        
+
         # Store reference for removal later
         if not hasattr(self, '_typing_indicators'):
             self._typing_indicators = {}
         self._typing_indicators[ai_name] = typing_message
-        
-        # No animation timer needed - using static "thinking..." text
-        
+
+        # Set active speaker in portrait column
+        self._set_active_speaker(ai_name, model)
+
         # Add to conversation and render
         if self.app.active_branch:
             branch_id = self.app.active_branch
@@ -1683,7 +1681,7 @@ class ConversationManager:
                 self.app.main_conversation = []
             self.app.main_conversation.append(typing_message)
             self.app.left_pane.conversation = self.app.main_conversation
-        
+
         self.app.left_pane.render_conversation()
     
     def _update_typing_animation(self):
@@ -1721,10 +1719,60 @@ class ConversationManager:
         for ai_name in ai_names:
             self._remove_typing_indicator(ai_name)
     
+    def _update_portrait_column(self):
+        """Update portrait column with current conversation participants"""
+        if not hasattr(self.app, 'portrait_column'):
+            return
+
+        # Build list of participants based on current settings
+        participants = []
+        num_ais = self.app.num_ais
+
+        for i in range(1, num_ais + 1):
+            ai_name = f"AI-{i}"
+            model_id = self.app.ai_models[i - 1] if i <= len(self.app.ai_models) else "unknown"
+
+            # Extract provider/model name from model_id
+            # e.g., "anthropic/claude-opus-4.5" -> use "claude"
+            if '/' in model_id:
+                provider_model = model_id.split('/')[-1]  # Get part after /
+            else:
+                provider_model = model_id
+
+            participants.append((provider_model, ai_name))
+
+        # Clear and rebuild portrait column
+        # Remove old portraits
+        for card in list(self.app.portrait_column.portrait_cards.values()):
+            card.setParent(None)
+            card.deleteLater()
+        self.app.portrait_column.portrait_cards.clear()
+
+        # Add new portraits
+        print(f"[Portrait Column] Adding {len(participants)} participants:")
+        for model_name, char_name in participants:
+            print(f"  - {char_name}: {model_name}")
+            self.app.portrait_column.add_participant(model_name, char_name)
+        print(f"[Portrait Column] Total portraits now: {len(self.app.portrait_column.portrait_cards)}")
+
+    def _set_active_speaker(self, ai_name, model):
+        """Set the active speaker in the portrait column"""
+        if not hasattr(self.app, 'portrait_column'):
+            return
+
+        # Use ai_name (e.g., "AI-1") as the key, since character names are unique
+        # even when multiple AIs use the same model
+        self.app.portrait_column.set_active_speaker(ai_name)
+
+    def _clear_active_speaker(self):
+        """Clear active speaker highlighting"""
+        if hasattr(self.app, 'portrait_column'):
+            self.app.portrait_column.clear_active_speaker()
+
     def on_ai_response_received(self, ai_name, response_content):
         """Handle AI responses for both main and branch conversations"""
         print(f"Response received from {ai_name}: {response_content[:100]}...")
-        
+
         # Remove typing indicator for this AI
         self._remove_typing_indicator(ai_name)
         
