@@ -1009,6 +1009,130 @@ class GlowButton(QPushButton):
         self.shadow.setBlurRadius(self.base_blur)
         super().leaveEvent(event)
 
+
+class StartingPromptWidget(QWidget):
+    """
+    Horizontal widget combining prompt dropdown + inline editable text field + token counter.
+
+    Layout: [ Starting prompt: ] [ Debate ▾ ] [ Take opposing positions and debate... ] [ ~12 tokens ]
+
+    - Dropdown populates text field when a prompt is selected
+    - User can freely edit the text before submitting
+    - Single-line QLineEdit for clean, compact appearance
+    - Token counter updates live as user types
+    """
+
+    # Signal emitted when Enter is pressed in the text field
+    returnPressed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(6)
+
+        # Label
+        label = QLabel("Starting prompt:")
+        label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        layout.addWidget(label)
+
+        # Prompt dropdown
+        self.prompt_selector = NoScrollComboBox()
+        self.prompt_selector.addItem("(Type your own)")
+        for prompt_name in sorted(STARTING_PROMPTS.keys()):
+            self.prompt_selector.addItem(prompt_name)
+        self.prompt_selector.addItem("─────────────────")  # Separator
+        self.prompt_selector.addItem("⚙ Manage Prompts...")
+        self.prompt_selector.setStyleSheet(get_combobox_style())
+        self.prompt_selector.setMaximumWidth(200)
+        self.prompt_selector.currentTextChanged.connect(self._on_prompt_selected)
+        layout.addWidget(self.prompt_selector)
+
+        # Editable text field (single line)
+        self.text_field = QLineEdit()
+        self.text_field.setPlaceholderText("Seed the conversation or just click PROPAGATE...")
+        font = QFont("Iosevka Term", 10)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self.text_field.setFont(font)
+        self.text_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 6px 8px;
+                selection-background-color: {COLORS['accent_cyan']};
+                selection-color: {COLORS['bg_dark']};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {COLORS['accent_cyan']};
+                color: {COLORS['text_bright']};
+            }}
+        """)
+        # Enter key triggers submit
+        self.text_field.returnPressed.connect(self.returnPressed)
+        # Live token counter
+        self.text_field.textChanged.connect(self._update_token_counter)
+        layout.addWidget(self.text_field, 1)  # Stretch to fill available space
+
+        # Token counter
+        self.token_counter = QLabel("~0 tokens")
+        self.token_counter.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        self.token_counter.setMinimumWidth(70)
+        layout.addWidget(self.token_counter)
+
+    def _on_prompt_selected(self, prompt_name):
+        """Handle prompt dropdown selection - populate text field."""
+        if prompt_name == "⚙ Manage Prompts...":
+            # Walk up to find the main app and open settings
+            parent = self.parent()
+            while parent and not hasattr(parent, 'open_settings_dialog'):
+                parent = parent.parent()
+            if parent:
+                parent.open_settings_dialog()
+            # Reset dropdown
+            self.prompt_selector.setCurrentIndex(0)
+        elif prompt_name == "─────────────────":
+            # Separator - reset
+            self.prompt_selector.setCurrentIndex(0)
+        elif prompt_name == "(Type your own)":
+            pass  # Let user type freely
+        elif prompt_name in STARTING_PROMPTS:
+            # Load prompt text into the text field
+            self.text_field.setText(STARTING_PROMPTS[prompt_name])
+
+    def _update_token_counter(self, text):
+        """Update token count estimate based on text length."""
+        token_estimate = len(text) // 4 if text else 0
+        self.token_counter.setText(f"~{token_estimate} tokens")
+
+    def get_prompt_text(self):
+        """Get the current text from the input field."""
+        return self.text_field.text().strip()
+
+    def set_prompt_text(self, text):
+        """Set the text in the input field."""
+        self.text_field.setText(text)
+
+    def clear(self):
+        """Clear the text field and reset dropdown."""
+        self.text_field.clear()
+        self.prompt_selector.setCurrentIndex(0)
+
+    def setEnabled(self, enabled):
+        """Enable/disable the entire widget."""
+        super().setEnabled(enabled)
+        self.text_field.setEnabled(enabled)
+        self.prompt_selector.setEnabled(enabled)
+
+    def setFocus(self):
+        """Focus the text field."""
+        self.text_field.setFocus()
+
+
 # Load custom fonts
 def load_fonts():
     """Load custom fonts for the application"""
@@ -2832,12 +2956,20 @@ class ConversationPane(QWidget):
         self.text_formats["ai_label"].setFontWeight(QFont.Weight.Bold)
     
     def setup_ui(self):
-        """Set up the user interface for the conversation pane"""
+        """Set up the user interface for the conversation pane.
+
+        Two-mode layout:
+        - Entry mode: Shows entry_panel (scenario/AIs/models) + prompt widget + buttons
+        - Viewing mode: Hides entry_panel, maximizes conversation_display space
+
+        Layout order (top to bottom):
+          Title bar → config_status → entry_panel → conversation_display → StartingPromptWidget → action_bar
+        """
         # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)  # Reduced spacing
-        
+        layout.setSpacing(5)
+
         # Title and info area
         title_layout = QHBoxLayout()
         self.title_label = QLabel("╔═ LIMINAL BACKROOMS ═╗")
@@ -2863,7 +2995,7 @@ class ConversationPane(QWidget):
 
         layout.addLayout(title_layout)
 
-        # Config status display - shows current settings
+        # Config status display - shows current settings (hidden in viewing mode)
         self.config_status_label = QLabel("")
         self.config_status_label.setStyleSheet(f"""
             color: {COLORS['text_dim']};
@@ -2875,29 +3007,37 @@ class ConversationPane(QWidget):
         layout.addWidget(self.config_status_label)
 
         # ====================================================================
-        # SETUP CONTROLS - Shown only when conversation is empty
+        # ENTRY PANEL - Configuration controls, visible only in entry mode
         # ====================================================================
-        self.setup_controls = QWidget()
-        setup_layout = QVBoxLayout(self.setup_controls)
-        setup_layout.setContentsMargins(0, 10, 0, 10)
-        setup_layout.setSpacing(8)
+        self.entry_panel = QWidget()
+        self.entry_panel.setStyleSheet(f"""
+            QWidget#entry_panel {{
+                background-color: {COLORS['bg_medium']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+            }}
+        """)
+        self.entry_panel.setObjectName("entry_panel")
+        entry_layout = QVBoxLayout(self.entry_panel)
+        entry_layout.setContentsMargins(12, 12, 12, 12)
+        entry_layout.setSpacing(8)
 
         # Scenario selector
         scenario_row = QHBoxLayout()
         scenario_label = QLabel("Scenario:")
-        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
         scenario_row.addWidget(scenario_label)
 
         self.scenario_selector = NoScrollComboBox()
         self.scenario_selector.addItems(sorted(SYSTEM_PROMPT_PAIRS.keys()))
         self.scenario_selector.setStyleSheet(get_combobox_style())
         scenario_row.addWidget(self.scenario_selector, 1)
-        setup_layout.addLayout(scenario_row)
+        entry_layout.addLayout(scenario_row)
 
         # Number of AIs selector
         num_ais_row = QHBoxLayout()
         num_ais_label = QLabel("Number of AIs:")
-        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
         num_ais_row.addWidget(num_ais_label)
 
         self.num_ais_selector = NoScrollComboBox()
@@ -2905,108 +3045,49 @@ class ConversationPane(QWidget):
         self.num_ais_selector.setCurrentText("3")  # Default
         self.num_ais_selector.setStyleSheet(get_combobox_style())
         num_ais_row.addWidget(self.num_ais_selector, 1)
-        setup_layout.addLayout(num_ais_row)
+        entry_layout.addLayout(num_ais_row)
 
-        # AI model assignments container (will be populated dynamically)
+        # AI model assignments container (populated dynamically by _populate_ai_assignments)
         self.ai_assignments_container = QWidget()
         self.ai_assignments_layout = QVBoxLayout(self.ai_assignments_container)
         self.ai_assignments_layout.setContentsMargins(0, 0, 0, 0)
         self.ai_assignments_layout.setSpacing(8)
-        setup_layout.addWidget(self.ai_assignments_container)
+        entry_layout.addWidget(self.ai_assignments_container)
 
-        # Store AI model selectors
+        # Store AI model selectors (list of GroupedModelComboBox instances)
         self.ai_model_selectors = []
 
-        # Separator
-        separator = QLabel("─" * 80)
-        separator.setStyleSheet(f"color: {COMIC_COLORS['black']}; font-size: 8px;")
-        setup_layout.addWidget(separator)
+        layout.addWidget(self.entry_panel)
 
-        layout.addWidget(self.setup_controls)
-
-        # Conversation display (widget-based chat scroll area)
-        # Each message is a separate widget - no setHtml() means no scroll jumping!
+        # ====================================================================
+        # CONVERSATION DISPLAY - Always visible, takes most space
+        # ====================================================================
         self.conversation_display = ChatScrollArea()
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
-        
-        # Set font for the container (will cascade to message widgets)
+
+        # Set font for the container (cascades to message widgets)
         font = QFont("Iosevka Term", 10)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.conversation_display.container.setFont(font)
-        
-        # Input area with label
-        input_container = QWidget()
-        input_layout = QVBoxLayout(input_container)
-        input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(8)  # Better spacing between input and buttons
 
-        # Label row with token counter
-        label_row = QWidget()
-        label_row_layout = QHBoxLayout(label_row)
-        label_row_layout.setContentsMargins(0, 0, 0, 0)
-        label_row_layout.setSpacing(0)
+        layout.addWidget(self.conversation_display, 1)  # Gets most space
 
-        input_label = QLabel("Your message:")
-        input_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
-        label_row_layout.addWidget(input_label)
+        # ====================================================================
+        # STARTING PROMPT WIDGET - Always visible (dropdown + text + tokens)
+        # ====================================================================
+        self.starting_prompt_widget = StartingPromptWidget()
+        layout.addWidget(self.starting_prompt_widget, 0)
 
-        label_row_layout.addStretch()
-
-        # Token counter
-        self.input_token_counter = QLabel("~0 tokens")
-        self.input_token_counter.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        label_row_layout.addWidget(self.input_token_counter)
-
-        input_layout.addWidget(label_row)
-
-        # Starting prompt selector
-        prompt_selector_layout = QHBoxLayout()
-        prompt_selector_layout.setContentsMargins(0, 0, 0, 0)
-        prompt_selector_layout.setSpacing(8)
-
-        prompt_label = QLabel("Starting prompt:")
-        prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
-        prompt_selector_layout.addWidget(prompt_label)
-
-        self.prompt_selector = NoScrollComboBox()
-        self.prompt_selector.addItem("(Type your own)")
-        # Load from config.STARTING_PROMPTS
-        for prompt_name in sorted(STARTING_PROMPTS.keys()):
-            self.prompt_selector.addItem(prompt_name)
-        self.prompt_selector.addItem("─────────────────")  # Separator
-        self.prompt_selector.addItem("⚙ Manage Prompts...")
-        self.prompt_selector.setStyleSheet(get_combobox_style())
-        self.prompt_selector.currentTextChanged.connect(self._on_prompt_selected)
-        prompt_selector_layout.addWidget(self.prompt_selector, 1)  # Stretch to fill
-
-        input_layout.addLayout(prompt_selector_layout)
-
-        # Input field with modern styling
-        self.input_field = QTextEdit()
-        self.input_field.setPlaceholderText("Seed the conversation or just click propagate...")
-        self.input_field.setMaximumHeight(60)  # Reduced height
-        self.input_field.setFont(font)
-        self.input_field.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 8px;
-                selection-background-color: {COLORS['accent_cyan']};
-                selection-color: {COLORS['bg_dark']};
-            }}
-        """)
-        input_layout.addWidget(self.input_field)
-        
-        # Button container for better layout
+        # ====================================================================
+        # ACTION BAR - Buttons row
+        # ====================================================================
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(5)  # Reduced spacing
-        
-        # Upload image button
+        button_layout.setSpacing(5)
+
+        # Upload image button (hidden in viewing mode)
         self.upload_image_button = QPushButton("📎 IMAGE")
         self.upload_image_button.setStyleSheet(f"""
             QPushButton {{
@@ -3030,8 +3111,8 @@ class ConversationPane(QWidget):
             }}
         """)
         self.upload_image_button.setToolTip("Upload an image to include in your message")
-        
-        # Clear button - no glow effect
+
+        # Clear button (hidden in viewing mode)
         self.clear_button = QPushButton("CLEAR")
         self.clear_button.setStyleSheet(f"""
             QPushButton {{
@@ -3054,7 +3135,7 @@ class ConversationPane(QWidget):
                 background-color: {COLORS['border_glow']};
             }}
         """)
-        
+
         # Submit button with cyberpunk styling and glow effect
         self.submit_button = GlowButton("⚡ PROPAGATE", COLORS['accent_cyan'])
         self.submit_button.setStyleSheet(f"""
@@ -3083,7 +3164,7 @@ class ConversationPane(QWidget):
                 border: 1px solid {COLORS['border']};
             }}
         """)
-        
+
         # Reset button - clears conversation context (no glow)
         self.reset_button = QPushButton("↺ RESET")
         self.reset_button.setStyleSheet(f"""
@@ -3113,20 +3194,26 @@ class ConversationPane(QWidget):
             }}
         """)
         self.reset_button.setToolTip("Clear conversation and start fresh")
-        
-        # Add buttons to layout
+
+        # Layout: IMAGE | CLEAR | stretch | RESET | PROPAGATE
         button_layout.addWidget(self.upload_image_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addStretch()
         button_layout.addWidget(self.reset_button)
         button_layout.addWidget(self.submit_button)
-        
-        # Add input container to main layout
-        input_layout.addWidget(button_container)
-        
-        # Add widgets to layout with adjusted stretch factors
-        layout.addWidget(self.conversation_display, 1)  # Main conversation area gets most space
-        layout.addWidget(input_container, 0)  # Input area gets minimal space
+
+        layout.addWidget(button_container, 0)
+
+        # Keep a reference to button_container for potential future use
+        self.button_container = button_container
+
+        # ====================================================================
+        # COMPATIBILITY: Create input_field as alias for StartingPromptWidget
+        # So existing code that references self.input_field still works
+        # ====================================================================
+        self.input_field = self.starting_prompt_widget.text_field
+        self.prompt_selector = self.starting_prompt_widget.prompt_selector
+        self.input_token_counter = self.starting_prompt_widget.token_counter
     
     def connect_signals(self):
         """Connect signals and slots"""
@@ -3142,13 +3229,10 @@ class ConversationPane(QWidget):
         # Clear button
         self.clear_button.clicked.connect(self.clear_input)
 
-        # Enter key in input field
-        self.input_field.installEventFilter(self)
+        # Enter key in StartingPromptWidget text field triggers submit
+        self.starting_prompt_widget.returnPressed.connect(self.handle_propagate_click)
 
-        # Token counter update
-        self.input_field.textChanged.connect(self.update_input_token_counter)
-
-        # Setup controls
+        # Setup controls - entry panel selectors
         if hasattr(self, 'num_ais_selector'):
             self.num_ais_selector.currentTextChanged.connect(self._populate_ai_assignments)
             self.num_ais_selector.currentTextChanged.connect(self._on_num_ais_changed)
@@ -3159,46 +3243,49 @@ class ConversationPane(QWidget):
             self.scenario_selector.currentTextChanged.connect(self._on_scenario_changed)
 
     def _populate_ai_assignments(self):
-        """Populate AI model assignment dropdowns based on number of AIs selected"""
-        # Clear existing assignments
-        for i in reversed(range(self.ai_assignments_layout.count())):
-            widget = self.ai_assignments_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
-                widget.deleteLater()
+        """Populate AI model assignment dropdowns using GroupedModelComboBox.
+
+        Uses the hierarchical Tier > Provider > Model selector instead of
+        a flat alphabetical list.
+        """
+        # Clear existing assignments - remove both widgets and sub-layouts
+        while self.ai_assignments_layout.count():
+            item = self.ai_assignments_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+            elif item.layout():
+                # Recursively clear sub-layouts
+                sub_layout = item.layout()
+                while sub_layout.count():
+                    sub_item = sub_layout.takeAt(0)
+                    if sub_item.widget():
+                        sub_item.widget().setParent(None)
+                        sub_item.widget().deleteLater()
 
         self.ai_model_selectors = []
 
         # Get number of AIs
         num_ais = int(self.num_ais_selector.currentText())
 
-        # Flatten AI_MODELS to get all model display names
-        all_model_names = []
-        for tier_models in AI_MODELS.values():  # "Paid", "Free"
-            for provider_models in tier_models.values():  # "Anthropic", "OpenAI", etc.
-                all_model_names.extend(provider_models.keys())
-
-        # Create a selector for each AI
+        # Create a GroupedModelComboBox for each AI slot
         for i in range(1, num_ais + 1):
             ai_row = QHBoxLayout()
             ai_label = QLabel(f"AI-{i} model:")
-            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+            ai_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
             ai_row.addWidget(ai_label)
 
-            ai_model_selector = NoScrollComboBox()
-            ai_model_selector.addItems(sorted(all_model_names))
-            # Default to first model
-            if len(all_model_names) > 0:
-                ai_model_selector.setCurrentIndex(0)
+            # Use GroupedModelComboBox for hierarchical model selection
+            ai_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
             ai_model_selector.setStyleSheet(get_combobox_style())
             ai_row.addWidget(ai_model_selector, 1)
 
             self.ai_assignments_layout.addLayout(ai_row)
             self.ai_model_selectors.append(ai_model_selector)
 
-            # Connect each selector to update app settings
-            ai_model_selector.currentTextChanged.connect(
-                lambda text, index=i-1: self._on_ai_model_changed(index, text)
+            # Connect each selector - use currentIndexChanged for GroupedModelComboBox
+            ai_model_selector.currentIndexChanged.connect(
+                lambda idx, index=i-1, sel=ai_model_selector: self._on_ai_model_changed(index, sel.get_selected_model_id())
             )
 
     def _on_scenario_changed(self, scenario_name):
@@ -3229,28 +3316,30 @@ class ConversationPane(QWidget):
                     main_window.num_ais
                 )
 
-    def _on_ai_model_changed(self, ai_index, display_name):
-        """Update app when an AI model assignment is changed"""
+    def _on_ai_model_changed(self, ai_index, model_id):
+        """Update app when an AI model assignment is changed.
+
+        Args:
+            ai_index: Zero-based index of the AI slot (0 = AI-1, 1 = AI-2, etc.)
+            model_id: The model ID string from GroupedModelComboBox.get_selected_model_id()
+        """
         main_window = self.window()
-        if hasattr(main_window, 'ai_models'):
-            # Convert display name to model ID
-            model_id = get_model_id(display_name)
-            if model_id:
-                # Ensure ai_models list is long enough
-                while len(main_window.ai_models) <= ai_index:
-                    main_window.ai_models.append(list(AI_MODELS.values())[0])
-                main_window.ai_models[ai_index] = model_id
-                # Update config status display
-                if hasattr(main_window, 'left_pane'):
-                    main_window.left_pane.update_config_status(
-                        main_window.conversation_mode,
-                        main_window.current_scenario,
-                        main_window.max_iterations,
-                        main_window.num_ais
-                    )
+        if hasattr(main_window, 'ai_models') and model_id:
+            # Ensure ai_models list is long enough
+            while len(main_window.ai_models) <= ai_index:
+                main_window.ai_models.append("anthropic/claude-opus-4.5")
+            main_window.ai_models[ai_index] = model_id
+            # Update config status display
+            if hasattr(main_window, 'left_pane'):
+                main_window.left_pane.update_config_status(
+                    main_window.conversation_mode,
+                    main_window.current_scenario,
+                    main_window.max_iterations,
+                    main_window.num_ais
+                )
 
     def sync_setup_controls(self):
-        """Sync setup controls with app settings"""
+        """Sync setup controls with app settings."""
         main_window = self.window()
 
         # Scenario
@@ -3263,27 +3352,26 @@ class ConversationPane(QWidget):
         if hasattr(self, 'num_ais_selector') and hasattr(main_window, 'num_ais'):
             self.num_ais_selector.setCurrentText(str(main_window.num_ais))
 
-        # AI model assignments (convert model IDs to display names)
+        # AI model assignments - use set_model_by_id() on GroupedModelComboBox
         if hasattr(main_window, 'ai_models'):
             for i, model_id in enumerate(main_window.ai_models[:len(self.ai_model_selectors)]):
                 if i < len(self.ai_model_selectors):
-                    # Convert model_id to display name
-                    display_name = get_display_name(model_id)
-                    index = self.ai_model_selectors[i].findText(display_name)
-                    if index >= 0:
-                        self.ai_model_selectors[i].setCurrentIndex(index)
+                    self.ai_model_selectors[i].set_model_by_id(model_id)
     
     def clear_input(self):
         """Clear the input field"""
-        self.input_field.clear()
+        self.starting_prompt_widget.clear()
         self.uploaded_image_path = None
         self.uploaded_image_base64 = None
         self.upload_image_button.setText("📎 IMAGE")
-        self.input_field.setFocus()
+        self.starting_prompt_widget.setFocus()
 
     def update_input_token_counter(self):
-        """Update the token counter based on input field text length"""
-        text = self.input_field.toPlainText()
+        """Update the token counter based on input field text length.
+        Note: Token counter is now handled internally by StartingPromptWidget,
+        but this method is kept for any external callers.
+        """
+        text = self.starting_prompt_widget.get_prompt_text()
         token_estimate = len(text) // 4 if text else 0
         self.input_token_counter.setText(f"~{token_estimate} tokens")
     
@@ -3338,24 +3426,20 @@ class ConversationPane(QWidget):
                 )
     
     def eventFilter(self, obj, event):
-        """Filter events to handle Enter key in input field"""
-        if obj is self.input_field and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                self.handle_propagate_click()
-                return True
+        """Filter events - Enter key is now handled by StartingPromptWidget.returnPressed signal."""
         return super().eventFilter(obj, event)
     
     def handle_propagate_click(self):
         """Handle click on the propagate button"""
-        # Get the input text (might be empty)
-        input_text = self.input_field.toPlainText().strip()
-        
+        # Get the input text from the StartingPromptWidget
+        input_text = self.starting_prompt_widget.get_prompt_text()
+
         # Prepare message data (text + optional image)
         message_data = {
             'text': input_text,
             'image': None
         }
-        
+
         # Include image if one was uploaded
         if self.uploaded_image_base64:
             message_data['image'] = {
@@ -3363,18 +3447,17 @@ class ConversationPane(QWidget):
                 'base64': self.uploaded_image_base64['data'],
                 'media_type': self.uploaded_image_base64['media_type']
             }
-        
-        # Clear the input box and image
-        self.input_field.clear()
+
+        # Clear the input and image
+        self.starting_prompt_widget.clear()
         self.uploaded_image_path = None
         self.uploaded_image_base64 = None
         self.upload_image_button.setText("📎 IMAGE")
-        self.input_field.setPlaceholderText("Seed the conversation or just click propagate...")
-        
+
         # Always call the input callback, even with empty input
         if hasattr(self, 'input_callback') and self.input_callback:
             self.input_callback(message_data)
-        
+
         # Start loading animation
         self.start_loading()
     
@@ -3399,18 +3482,19 @@ class ConversationPane(QWidget):
         self.conversation = []
         
         # Clear the input field
-        self.input_field.clear()
+        self.starting_prompt_widget.clear()
         self.uploaded_image_path = None
         self.uploaded_image_base64 = None
         self.upload_image_button.setText("📎 IMAGE")
-        
-        # Re-render empty conversation
+
+        # Re-render empty conversation and switch to entry mode
         self.render_conversation()
-        
+        self.set_ui_mode('entry')
+
         # Update status bar
         if hasattr(main_window, 'statusBar'):
             main_window.statusBar().showMessage("Conversation reset - ready for new session")
-        
+
         print("[UI] Conversation reset by user")
     
     def set_input_callback(self, callback):
@@ -3431,31 +3515,6 @@ class ConversationPane(QWidget):
         display_scenario = scenario[:30] + "..." if len(scenario) > 30 else scenario
         text = f"[Mode: {mode} | Scenario: {display_scenario} | {iterations} turns | {num_ais} AIs]"
         self.config_status_label.setText(text)
-
-    def _on_prompt_selected(self, prompt_name):
-        """Handle starting prompt selection"""
-        if prompt_name == "⚙ Manage Prompts...":
-            # Open Settings dialog to Prompts tab
-            if hasattr(self.parent(), 'open_settings_dialog'):
-                parent_app = self.parent()
-                # Find the LiminalBackroomsApp (might be grandparent)
-                while parent_app and not hasattr(parent_app, 'open_settings_dialog'):
-                    parent_app = parent_app.parent()
-                if parent_app:
-                    parent_app.open_settings_dialog()
-                    # TODO: Open directly to Prompts tab
-            # Reset dropdown to previous selection
-            self.prompt_selector.setCurrentIndex(0)
-        elif prompt_name == "─────────────────":
-            # Separator - reset to first item
-            self.prompt_selector.setCurrentIndex(0)
-        elif prompt_name == "(Type your own)":
-            # Do nothing - let user type
-            pass
-        elif prompt_name in STARTING_PROMPTS:
-            # Load prompt text into input field
-            prompt_text = STARTING_PROMPTS[prompt_name]
-            self.input_field.setPlainText(prompt_text)
 
     # =========================================================================
     # SCROLL MANAGEMENT
@@ -3479,18 +3538,41 @@ class ConversationPane(QWidget):
     def reset_scroll_state(self):
         """Reset to auto-scroll mode (delegates to ChatScrollArea)."""
         self.conversation_display.reset_scroll_state()
-    
+
+    def set_ui_mode(self, mode):
+        """Switch between 'entry' and 'viewing' mode.
+
+        Entry mode:  entry_panel visible, config_status visible, IMAGE/CLEAR visible
+        Viewing mode: entry_panel hidden, config_status hidden, IMAGE/CLEAR hidden
+
+        Both modes always show: conversation_display, StartingPromptWidget, RESET, PROPAGATE
+        """
+        is_entry = (mode == 'entry')
+
+        # Entry panel (scenario, num AIs, model selectors)
+        if hasattr(self, 'entry_panel'):
+            self.entry_panel.setVisible(is_entry)
+
+        # Config status line
+        if hasattr(self, 'config_status_label'):
+            self.config_status_label.setVisible(is_entry)
+
+        # IMAGE and CLEAR buttons - only in entry mode
+        if hasattr(self, 'upload_image_button'):
+            self.upload_image_button.setVisible(is_entry)
+        if hasattr(self, 'clear_button'):
+            self.clear_button.setVisible(is_entry)
+
     def update_conversation(self, conversation):
-        """Update conversation display"""
+        """Update conversation display and switch UI mode based on content."""
         self.conversation = conversation
         self.render_conversation()
 
-        # Hide setup controls once conversation starts
-        if hasattr(self, 'setup_controls'):
-            if len(conversation) > 0:
-                self.setup_controls.hide()
-            else:
-                self.setup_controls.show()
+        # Switch mode: viewing when messages exist, entry when empty
+        if len(conversation) > 0:
+            self.set_ui_mode('viewing')
+        else:
+            self.set_ui_mode('entry')
     
     def update_streaming_content(self, ai_name: str, new_content: str):
         """
@@ -4055,7 +4137,7 @@ class ConversationPane(QWidget):
         """Start loading animation"""
         self.loading = True
         self.loading_dots = 0
-        self.input_field.setEnabled(False)
+        self.starting_prompt_widget.setEnabled(False)
         self.submit_button.setEnabled(False)
         self.reset_button.setEnabled(False)  # Disable reset during processing
         
@@ -4091,7 +4173,7 @@ class ConversationPane(QWidget):
         """Stop loading animation"""
         self.loading = False
         self.loading_timer.stop()
-        self.input_field.setEnabled(True)
+        self.starting_prompt_widget.setEnabled(True)
         self.submit_button.setEnabled(True)
         self.reset_button.setEnabled(True)  # Re-enable reset button
         self.submit_button.setText("⚡ PROPAGATE")
