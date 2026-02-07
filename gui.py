@@ -1135,22 +1135,25 @@ class StartingPromptWidget(QWidget):
 
 # Load custom fonts
 def load_fonts():
-    """Load custom fonts for the application"""
-    font_dir = Path("fonts")
+    """Load custom fonts for the application."""
+    # Use the project directory (where gui.py lives) to find fonts/
+    project_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    font_dir = project_dir / "fonts"
     font_dir.mkdir(exist_ok=True)
     
-    # List of fonts to load - these would need to be included with the application
+    # List of fonts to load - bundled with the application
     fonts = [
         ("IosevkaTerm-Regular.ttf", "Iosevka Term"),
         ("IosevkaTerm-Bold.ttf", "Iosevka Term"),
         ("IosevkaTerm-Italic.ttf", "Iosevka Term"),
+        ("Bangers-Regular.ttf", "Bangers"),  # Comic book display font
     ]
     
     loaded_fonts = []
     for font_file, font_name in fonts:
         font_path = font_dir / font_file
         if font_path.exists():
-            font_id = QFontDatabase.addApplicationFont(str(font_path))
+            font_id = QFontDatabase.addApplicationFont(str(font_path.resolve()))
             if font_id >= 0:
                 if font_name not in loaded_fonts:
                     loaded_fonts.append(font_name)
@@ -2970,41 +2973,64 @@ class ConversationPane(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
 
-        # Title and info area
-        title_layout = QHBoxLayout()
-        self.title_label = QLabel("╔═ LIMINAL BACKROOMS ═╗")
+        # ====================================================================
+        # COMIC BOOK BANNER - Always visible, app identity
+        # ====================================================================
+        self.banner_frame = QFrame()
+        self.banner_frame.setObjectName("comic_banner")
+        self.banner_frame.setStyleSheet(f"""
+            QFrame#comic_banner {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COMIC_COLORS['banner_red']},
+                    stop:1 {COMIC_COLORS['banner_red_dark']});
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 0px;
+                padding: 6px 16px;
+            }}
+        """)
+
+        banner_layout = QVBoxLayout(self.banner_frame)
+        banner_layout.setContentsMargins(0, 2, 0, 2)
+        banner_layout.setSpacing(2)
+
+        # Title: "INFERENCE LOUNGE" in Bangers font, yellow, centered
+        self.title_label = QLabel("INFERENCE LOUNGE")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
-            font-size: 14px;
-            font-weight: bold;
-            padding: 4px;
-            letter-spacing: 2px;
+            QLabel {{
+                color: {COMIC_COLORS['banner_yellow']};
+                font-family: 'Bangers', 'Impact', 'Arial Black', sans-serif;
+                font-size: 28px;
+                font-weight: bold;
+                letter-spacing: 3px;
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
         """)
+        banner_layout.addWidget(self.title_label)
 
-        self.info_label = QLabel("[ AI-TO-AI CONVERSATION ]")
-        self.info_label.setStyleSheet(f"""
-            color: {COLORS['text_glow']};
-            font-size: 10px;
-            padding: 2px;
-            letter-spacing: 1px;
-        """)
-
-        title_layout.addWidget(self.title_label)
-        title_layout.addStretch()
-        title_layout.addWidget(self.info_label)
-
-        layout.addLayout(title_layout)
-
-        # Config status display - shows current settings (hidden in viewing mode)
+        # Subtitle: config status + info label (italic, cream, centered)
         self.config_status_label = QLabel("")
+        self.config_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.config_status_label.setStyleSheet(f"""
-            color: {COLORS['text_dim']};
-            font-size: 10px;
-            padding: 2px 4px;
-            font-style: italic;
+            QLabel {{
+                color: {COMIC_COLORS['cream']};
+                font-family: 'Iosevka Term', 'Courier New', monospace;
+                font-size: 10px;
+                font-style: italic;
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
         """)
         self.config_status_label.setWordWrap(True)
-        layout.addWidget(self.config_status_label)
+        banner_layout.addWidget(self.config_status_label)
+
+        # Keep info_label reference for compatibility (main app sets its text)
+        self.info_label = self.config_status_label
+
+        layout.addWidget(self.banner_frame)
 
         # ====================================================================
         # ENTRY PANEL - Configuration controls, visible only in entry mode
@@ -3542,10 +3568,11 @@ class ConversationPane(QWidget):
     def set_ui_mode(self, mode):
         """Switch between 'entry' and 'viewing' mode.
 
-        Entry mode:  entry_panel visible, config_status visible, IMAGE/CLEAR visible
-        Viewing mode: entry_panel hidden, config_status hidden, IMAGE/CLEAR hidden
+        Entry mode:  entry_panel visible, IMAGE/CLEAR visible
+        Viewing mode: entry_panel hidden, IMAGE/CLEAR hidden
 
-        Both modes always show: conversation_display, StartingPromptWidget, RESET, PROPAGATE
+        Always visible in both modes: comic banner, conversation_display,
+        StartingPromptWidget, RESET, PROPAGATE
         """
         is_entry = (mode == 'entry')
 
@@ -3553,9 +3580,8 @@ class ConversationPane(QWidget):
         if hasattr(self, 'entry_panel'):
             self.entry_panel.setVisible(is_entry)
 
-        # Config status line
-        if hasattr(self, 'config_status_label'):
-            self.config_status_label.setVisible(is_entry)
+        # Banner stays visible in both modes (it's the app identity)
+        # Config status inside the banner is always shown
 
         # IMAGE and CLEAR buttons - only in entry mode
         if hasattr(self, 'upload_image_button'):
@@ -4304,8 +4330,8 @@ class ConversationPane(QWidget):
             self.title_label.setText(f"{branch_emoji} {branch_type.capitalize()}: {selected_text[:30]}...")
             self.info_label.setText(f"Branch conversation")
         else:
-            self.title_label.setText("Inference Lounge")
-            # Don't override info_label here - let mode selector control it
+            self.title_label.setText("INFERENCE LOUNGE")
+            # Don't override config_status here - let update_config_status control it
         
         # Debug: Print conversation to console
         print("\n--- DEBUG: Conversation Content ---")
@@ -4768,7 +4794,7 @@ class LiminalBackroomsApp(QMainWindow):
     
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("╔═ LIMINAL BACKROOMS v0.7 ═╗")
+        self.setWindowTitle("─── LIMINAL BACKROOMS v0.7 ───")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
 
@@ -5012,11 +5038,15 @@ class LiminalBackroomsApp(QMainWindow):
         self.splitter.splitterMoved.connect(self.save_splitter_state)
     
     def on_mode_changed(self, mode):
-        """Update the info label when conversation mode changes"""
-        if mode == "Human-AI":
-            self.left_pane.info_label.setText("[ HUMAN-TO-AI CONVERSATION ]")
-        else:
-            self.left_pane.info_label.setText("[ AI-TO-AI CONVERSATION ]")
+        """Update the banner config status when conversation mode changes"""
+        self.conversation_mode = mode
+        if hasattr(self, 'left_pane'):
+            self.left_pane.update_config_status(
+                self.conversation_mode,
+                self.current_scenario,
+                self.max_iterations,
+                self.num_ais
+            )
     
     def handle_user_input(self, text):
         """Handle user input from the conversation pane"""
