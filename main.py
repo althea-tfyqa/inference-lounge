@@ -40,7 +40,7 @@ from shared_utils import (
     generate_image_from_text,
     generate_video_with_sora
 )
-from gui import LiminalBackroomsApp, load_fonts
+from gui import LiminalBackroomsApp, load_fonts, MessageWidget
 from command_parser import parse_commands, AgentCommand, format_command_result
 
 # Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
@@ -1720,7 +1720,11 @@ class ConversationManager:
             self._remove_typing_indicator(ai_name)
     
     def _update_portrait_column(self):
-        """Update portrait column with current conversation participants"""
+        """Update portrait column with current conversation participants.
+
+        Passes speaker colors from MessageWidget.AI_COLORS so portrait borders
+        and labels match the message border colors in the conversation.
+        """
         if not hasattr(self.app, 'portrait_column'):
             return
 
@@ -1732,27 +1736,28 @@ class ConversationManager:
             ai_name = f"AI-{i}"
             model_id = self.app.ai_models[i - 1] if i <= len(self.app.ai_models) else "unknown"
 
-            # Extract provider/model name from model_id
-            # e.g., "anthropic/claude-opus-4.5" -> use "claude"
+            # Extract provider/model name for portrait image lookup
             if '/' in model_id:
-                provider_model = model_id.split('/')[-1]  # Get part after /
+                provider_model = model_id.split('/')[-1]
             else:
                 provider_model = model_id
 
-            participants.append((provider_model, ai_name))
+            # Get the speaker color that matches the message border color
+            speaker_color = MessageWidget.AI_COLORS.get(i, MessageWidget.AI_COLORS[1])
+
+            participants.append((provider_model, ai_name, speaker_color))
 
         # Clear and rebuild portrait column
-        # Remove old portraits
         for card in list(self.app.portrait_column.portrait_cards.values()):
             card.setParent(None)
             card.deleteLater()
         self.app.portrait_column.portrait_cards.clear()
 
-        # Add new portraits
+        # Add new portraits with matching speaker colors
         print(f"[Portrait Column] Adding {len(participants)} participants:")
-        for model_name, char_name in participants:
-            print(f"  - {char_name}: {model_name}")
-            self.app.portrait_column.add_participant(model_name, char_name)
+        for model_name, char_name, color in participants:
+            print(f"  - {char_name}: {model_name} (color: {color})")
+            self.app.portrait_column.add_participant(model_name, char_name, color)
         print(f"[Portrait Column] Total portraits now: {len(self.app.portrait_column.portrait_cards)}")
 
     def _set_active_speaker(self, ai_name, model):
@@ -2083,9 +2088,14 @@ class ConversationManager:
             ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_number)
         
+        # Check if image generation is enabled
+        if not self.app.auto_image:
+            print(f"[Agent] Image generation disabled — ignoring !image from {ai_name}")
+            return True, ""  # Silently skip, don't treat as error
+
         if not prompt or len(prompt.strip()) < 5:
             return False, f"❌ [{ai_name} ({model_name})]: !image — prompt too short"
-        
+
         print(f"[Agent] Generating image for {ai_name} ({model_name}): {prompt[:100]}...")
         
         # Run image generation in background thread to avoid blocking UI

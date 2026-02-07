@@ -1,22 +1,48 @@
 # Inference Lounge 🛋️
 
-A Python-based application that enables dynamic conversations between multiple AI models in a graphical user interface. Originally forked from [Liminal Backrooms](https://github.com/liminalbardo/liminal_backrooms), enhanced with a scenario editor and quality-of-life improvements.
+A Python-based application that enables dynamic conversations between multiple AI models in a comic book-styled graphical interface. Originally forked from [Liminal Backrooms](https://github.com/liminalbardo/liminal_backrooms), now enhanced with a 1950s comic book theme, scenario editor, and extensive quality-of-life improvements.
 
 > **Attribution**: This is a fork of the excellent [Liminal Backrooms](https://github.com/liminalbardo/liminal_backrooms) by LiminalBackrooms. See [ATTRIBUTION.md](ATTRIBUTION.md) for full details.
 
 ## What's New in Inference Lounge
 
-### ✨ New Features
+### 🎨 Comic Book Theme (February 2026)
+Complete visual overhaul inspired by 1950s comic book aesthetics:
+
+**Visual Design**:
+- **Retro comic fonts**: Bangers for titles, Comic Neue for body text
+- **Bold color palette**: Red, teal, gold, purple, navy speaker colors
+- **Thick black borders** (3px) on all UI elements for that comic book outline look
+- **Ben-Day halftone dots** overlay for authentic vintage feel
+- **Character portraits** in left column with circular frames
+- **Color-coded speakers**: Each AI gets a distinct color for instant recognition
+  - AI-1: Red border/nameplate
+  - AI-2: Teal border/nameplate
+  - AI-3: Gold border/nameplate
+  - AI-4: Purple border/nameplate
+  - AI-5: Navy border/nameplate
+
+**UI Improvements**:
+- **Active speaker highlighting**: Portrait glows with speaker's color when that AI is talking
+- **Message bubbles**: 8px colored left border matching speaker color + color-matched nameplates
+- **Red banner** with yellow "INFERENCE LOUNGE" title (Bangers font)
+- **Collapsing config panel**: Entry panel hides when conversation starts to maximize reading space
+- **Simplified prompt entry**: Free-form "Starting Prompt" field (no dropdown)
+- **"CONVERSE" button** replaces "PROPAGATE" for clarity
+- **Image generation toggle**: Defaults to OFF (AI image generation can be expensive)
+- **Cream/beige backgrounds** for vintage paper feel
+
+### ✨ Previous Features
 - **📝 Scenario Editor** - Create, edit, rename, and delete conversation scenarios through a GUI
   - Visual editor with 5 AI prompt fields
   - Automatic timestamped backups before saves
   - Handles complex prompts with quotes, newlines, special characters
-  - Purple "Edit Scenarios" button in control panel
   - No need to manually edit config.py anymore!
 
 ### 🐛 Bug Fixes
 - Made OpenAI API key optional (only needed for Sora video generation)
 - Fixed PyQt6 installation issues on macOS
+- Image generation now properly respects the toggle setting (gates both auto-generation and `!image` commands)
 
 ## What It Does
 
@@ -49,6 +75,14 @@ Fresh scenario prompts written by Claude Opus 4.5:
 All LLMs run through **OpenRouter**. For Sora video generation, you'll need an **OpenAI API key** (optional).
 
 ## Features
+
+- **Comic Book-Styled Interface**:
+  - 1950s vintage aesthetic with bold colors and thick borders
+  - Character portraits with per-speaker color coding
+  - Active speaker highlighting with colored glows
+  - Retro fonts (Bangers, Comic Neue)
+  - Ben-Day halftone dot overlay
+  - Collapsing configuration panel for distraction-free reading
 
 - Multi-model AI conversations with support for:
   - Claude (Anthropic) - all versions
@@ -132,15 +166,21 @@ poetry run python main.py
 2. GUI Controls:
    - **Mode Selection**: Choose between AI-AI conversation or Human-AI interaction
    - **Iterations**: Set number of conversation turns (1-100)
-   - **AI Model Selection**: Choose models for each AI slot
-   - **Prompt Style**: Select from predefined scenarios
-   - **Edit Scenarios** 🆕: Click the purple button to create/edit scenarios
-   - **Input Field**: Enter your message or initial prompt
+   - **AI Model Selection**: Choose models for each AI slot (hierarchical dropdown by tier/provider)
+   - **Scenario Selection**: Pick from predefined conversation scenarios
+   - **Edit Scenarios** 🆕: Click to create/edit scenarios via GUI
+   - **Image Generation Toggle** 🆕: Enable/disable AI image generation (defaults to OFF)
+   - **Starting Prompt Field** 🆕: Free-form text entry to seed the conversation (optional)
+   - **CONVERSE Button** 🆕: Start the conversation (entry panel collapses automatically)
+   - **Portrait Column** 🆕: Left sidebar shows character portraits with active speaker highlighting
+   - **RESET Button**: Clear conversation and return to entry mode
    - **Export**: Save conversation and generated images
    - **View HTML**: Open styled conversation in browser
    - **BackroomsBench (beta)**: Run multi-judge evaluation on conversations
 
 3. The AIs take it from there - they can add each other, generate images, and go wherever the scenario takes them.
+
+4. **Watch the portraits**: The active speaker's portrait glows and has a thicker border in their color while they're "talking."
 
 ## Using the Scenario Editor 🆕
 
@@ -160,8 +200,9 @@ poetry run python main.py
 
 Application settings in `config.py`:
 - Runtime settings (turn delay, etc.)
-- Available AI models in `AI_MODELS` dictionary
+- Available AI models in `AI_MODELS` dictionary (hierarchical: Tier > Provider > Model)
 - Scenario prompts in `SYSTEM_PROMPT_PAIRS` dictionary (or use the GUI editor!)
+- Speaker colors defined in `gui.py` → `MessageWidget.AI_COLORS`
 
 ### Developer Tools
 

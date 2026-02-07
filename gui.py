@@ -1039,25 +1039,13 @@ class StartingPromptWidget(QWidget):
         layout.setSpacing(6)
 
         # Label
-        label = QLabel("Starting prompt:")
+        label = QLabel("Starting Prompt:")
         label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 11px; font-weight: bold;")
         layout.addWidget(label)
 
-        # Prompt dropdown
-        self.prompt_selector = NoScrollComboBox()
-        self.prompt_selector.addItem("(Type your own)")
-        for prompt_name in sorted(STARTING_PROMPTS.keys()):
-            self.prompt_selector.addItem(prompt_name)
-        self.prompt_selector.addItem("─────────────────")  # Separator
-        self.prompt_selector.addItem("⚙ Manage Prompts...")
-        self.prompt_selector.setStyleSheet(get_comic_combobox_style())
-        self.prompt_selector.setMaximumWidth(200)
-        self.prompt_selector.currentTextChanged.connect(self._on_prompt_selected)
-        layout.addWidget(self.prompt_selector)
-
-        # Editable text field (single line)
+        # Editable text field (single line) — no dropdown, just free text
         self.text_field = QLineEdit()
-        self.text_field.setPlaceholderText("Seed the conversation or just click PROPAGATE...")
+        self.text_field.setPlaceholderText("Optionally seed the conversation or just hit Converse")
         self.text_field.setFont(QFont("Comic Neue", 12))
         self.text_field.setStyleSheet(f"""
             QLineEdit {{
@@ -1086,26 +1074,6 @@ class StartingPromptWidget(QWidget):
         self.token_counter.setMinimumWidth(70)
         layout.addWidget(self.token_counter)
 
-    def _on_prompt_selected(self, prompt_name):
-        """Handle prompt dropdown selection - populate text field."""
-        if prompt_name == "⚙ Manage Prompts...":
-            # Walk up to find the main app and open settings
-            parent = self.parent()
-            while parent and not hasattr(parent, 'open_settings_dialog'):
-                parent = parent.parent()
-            if parent:
-                parent.open_settings_dialog()
-            # Reset dropdown
-            self.prompt_selector.setCurrentIndex(0)
-        elif prompt_name == "─────────────────":
-            # Separator - reset
-            self.prompt_selector.setCurrentIndex(0)
-        elif prompt_name == "(Type your own)":
-            pass  # Let user type freely
-        elif prompt_name in STARTING_PROMPTS:
-            # Load prompt text into the text field
-            self.text_field.setText(STARTING_PROMPTS[prompt_name])
-
     def _update_token_counter(self, text):
         """Update token count estimate based on text length."""
         token_estimate = len(text) // 4 if text else 0
@@ -1120,15 +1088,13 @@ class StartingPromptWidget(QWidget):
         self.text_field.setText(text)
 
     def clear(self):
-        """Clear the text field and reset dropdown."""
+        """Clear the text field."""
         self.text_field.clear()
-        self.prompt_selector.setCurrentIndex(0)
 
     def setEnabled(self, enabled):
         """Enable/disable the entire widget."""
         super().setEnabled(enabled)
         self.text_field.setEnabled(enabled)
-        self.prompt_selector.setEnabled(enabled)
 
     def setFocus(self):
         """Focus the text field."""
@@ -3065,6 +3031,35 @@ class ConversationPane(QWidget):
         # Store AI model selectors (list of GroupedModelComboBox instances)
         self.ai_model_selectors = []
 
+        # Image generation toggle (default: OFF)
+        self.image_gen_checkbox = QCheckBox("Enable AI image generation")
+        self.image_gen_checkbox.setChecked(False)
+        self.image_gen_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COMIC_COLORS['navy']};
+                font-size: 13px;
+                font-weight: bold;
+                spacing: 8px;
+                padding: 6px 0px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 3px;
+                background-color: white;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COMIC_COLORS['teal']};
+                border-color: {COMIC_COLORS['black']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {COMIC_COLORS['teal']};
+            }}
+        """)
+        self.image_gen_checkbox.toggled.connect(self._on_image_gen_toggled)
+        entry_layout.addWidget(self.image_gen_checkbox)
+
         layout.addWidget(self.entry_panel)
 
         # ====================================================================
@@ -3104,7 +3099,7 @@ class ConversationPane(QWidget):
         self.clear_button.setStyleSheet(get_comic_button_style('subtle'))
 
         # Submit button — bold comic primary style
-        self.submit_button = GlowButton("PROPAGATE", COMIC_COLORS['banner_red'])
+        self.submit_button = GlowButton("CONVERSE", COMIC_COLORS['banner_red'])
         self.submit_button.setStyleSheet(get_comic_button_style('primary'))
 
         # Reset button - clears conversation context (no glow)
@@ -3112,7 +3107,7 @@ class ConversationPane(QWidget):
         self.reset_button.setStyleSheet(get_comic_button_style('secondary'))
         self.reset_button.setToolTip("Clear conversation and start fresh")
 
-        # Layout: IMAGE | CLEAR | stretch | RESET | PROPAGATE
+        # Layout: IMAGE | CLEAR | stretch | RESET | CONVERSE
         button_layout.addWidget(self.upload_image_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addStretch()
@@ -3129,7 +3124,6 @@ class ConversationPane(QWidget):
         # So existing code that references self.input_field still works
         # ====================================================================
         self.input_field = self.starting_prompt_widget.text_field
-        self.prompt_selector = self.starting_prompt_widget.prompt_selector
         self.input_token_counter = self.starting_prompt_widget.token_counter
     
     def connect_signals(self):
@@ -3204,6 +3198,12 @@ class ConversationPane(QWidget):
             ai_model_selector.currentIndexChanged.connect(
                 lambda idx, index=i-1, sel=ai_model_selector: self._on_ai_model_changed(index, sel.get_selected_model_id())
             )
+
+    def _on_image_gen_toggled(self, checked):
+        """Update app when image generation toggle is changed"""
+        main_window = self.window()
+        if hasattr(main_window, 'auto_image'):
+            main_window.auto_image = checked
 
     def _on_scenario_changed(self, scenario_name):
         """Update app when scenario is changed"""
@@ -3371,6 +3371,9 @@ class ConversationPane(QWidget):
         self.uploaded_image_base64 = None
         self.upload_image_button.setText("📎 IMAGE")
 
+        # Collapse the config panel — conversation is starting
+        self.set_ui_mode('viewing')
+
         # Always call the input callback, even with empty input
         if hasattr(self, 'input_callback') and self.input_callback:
             self.input_callback(message_data)
@@ -3463,7 +3466,7 @@ class ConversationPane(QWidget):
         Viewing mode: entry_panel hidden, IMAGE/CLEAR hidden
 
         Always visible in both modes: comic banner, conversation_display,
-        StartingPromptWidget, RESET, PROPAGATE
+        StartingPromptWidget, RESET, CONVERSE
         """
         is_entry = (mode == 'entry')
 
@@ -4064,22 +4067,16 @@ class ConversationPane(QWidget):
         self.submit_button.setText("Processing...")
         self.loading_timer.start()
         
-        # Update glow effect for processing state - dimmer cyan glow
-        if hasattr(self.submit_button, 'shadow'):
-            self.submit_button.shadow.setBlurRadius(12)
-            self.submit_button.shadow.setColor(QColor(COLORS['accent_cyan']))
-            self.submit_button.shadow.setOffset(0, 0)
-        
         # Set disabled style with fixed width to prevent resizing
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['accent_cyan']};
-                border: 1px solid {COLORS['accent_cyan']};
-                border-radius: 0px;
+                background-color: {COMIC_COLORS['cream']};
+                color: {COMIC_COLORS['navy']};
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 8px;
                 padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
+                font-family: 'Bangers';
+                font-size: 14px;
                 letter-spacing: 1px;
                 min-width: {current_width - 30}px;
                 max-width: {current_width}px;
@@ -4093,41 +4090,10 @@ class ConversationPane(QWidget):
         self.starting_prompt_widget.setEnabled(True)
         self.submit_button.setEnabled(True)
         self.reset_button.setEnabled(True)  # Re-enable reset button
-        self.submit_button.setText("⚡ PROPAGATE")
-        
-        # Reset glow effect
-        if hasattr(self.submit_button, 'shadow'):
-            self.submit_button.shadow.setBlurRadius(8)
-            self.submit_button.shadow.setColor(QColor(COLORS['accent_cyan']))
-            self.submit_button.shadow.setOffset(0, 2)
-            
-        # Reset button style to match original PROPAGATE button (no fixed width)
-        self.submit_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['accent_cyan']};
-                color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['accent_cyan']};
-                border-radius: 0px;
-                padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['accent_cyan']};
-                border: 1px solid {COLORS['accent_cyan']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['accent_cyan_active']};
-                color: {COLORS['text_bright']};
-            }}
-            QPushButton:disabled {{
-                background-color: {COLORS['border']};
-                color: {COLORS['text_dim']};
-                border: 1px solid {COLORS['border']};
-            }}
-        """)
+        self.submit_button.setText("CONVERSE")
+
+        # Reset to comic primary button style
+        self.submit_button.setStyleSheet(get_comic_button_style('primary'))
     
     def update_loading_animation(self):
         """Update loading animation dots - always 3 characters for fixed width"""
@@ -4796,8 +4762,8 @@ class LiminalBackroomsApp(QMainWindow):
         self.right_sidebar = RightSidebar()
 
         # Set minimum widths to prevent UI from being cut off when resizing
-        self.portrait_column.setMinimumWidth(120)  # Portrait column is narrower
-        self.portrait_column.setMaximumWidth(120)  # Keep it fixed
+        self.portrait_column.setMinimumWidth(140)  # Portrait column is narrower
+        self.portrait_column.setMaximumWidth(140)  # Keep it fixed
         self.left_pane.setMinimumWidth(600)  # Chat panel needs space for message boxes
         self.right_sidebar.setMinimumWidth(0)  # Right sidebar is hidden
 
@@ -5044,12 +5010,16 @@ class LiminalBackroomsApp(QMainWindow):
                 self.num_ais
             )
 
+        # Sync image generation checkbox with settings
+        if hasattr(self, 'left_pane') and hasattr(self.left_pane, 'image_gen_checkbox'):
+            self.left_pane.image_gen_checkbox.setChecked(self.auto_image)
+
         # Update button text based on mode
-        if hasattr(self, 'left_pane') and hasattr(self.left_pane, 'send_button'):
+        if hasattr(self, 'left_pane') and hasattr(self.left_pane, 'submit_button'):
             if self.conversation_mode == "Human-AI":
-                self.left_pane.send_button.setText("Send")
+                self.left_pane.submit_button.setText("SEND")
             else:
-                self.left_pane.send_button.setText("Propagate")
+                self.left_pane.submit_button.setText("CONVERSE")
 
         # Show confirmation
         self.statusBar().showMessage(f"Settings updated: {self.conversation_mode} mode, {self.num_ais} AIs, {self.max_iterations} iterations", 3000)
