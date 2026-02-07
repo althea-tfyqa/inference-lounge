@@ -80,27 +80,21 @@ class MessageWidget(QFrame):
     - AI colors applied per AI number
     """
     
-    # AI color mapping - matches styles.py COLORS
+    # Bold, distinct speaker colors — instantly tell who's talking
     AI_COLORS = {
-        1: '#6FFFE6',  # Bright Aqua
-        2: '#06E2D4',  # Teal
-        3: '#54F5E9',  # Turquoise
-        4: '#8BFCEF',  # Light Cyan
-        5: '#91FCFD',  # Pale Cyan
+        1: '#E63946',  # Red (Claude)
+        2: '#2A9D8F',  # Teal (GPT)
+        3: '#E9C46A',  # Gold (Gemini)
+        4: '#7B2D8E',  # Purple (Grok)
+        5: '#264653',  # Navy (DeepSeek)
     }
-    HUMAN_COLOR = '#ff00b3'  # Hot Pink/Magenta
+    HUMAN_COLOR = '#F4ACB7'  # Pink — human speaker
     TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
-    
-    # Tail dimensions for speech bubble triangles
-    TAIL_WIDTH = 18   # How far the tail sticks out horizontally
-    TAIL_HEIGHT = 20  # Vertical size of the tail triangle
 
     def __init__(self, message_data, parent=None):
         super().__init__(parent)
         self.message_data = message_data
         self._content_label = None  # Reference to content label for updates
-        self._tail_side = None      # 'left' for AI, 'right' for user, None for others
-        self._bubble_color = None   # Fill color for the tail triangle
         self._setup_ui()
 
     def _setup_ui(self):
@@ -252,16 +246,17 @@ class MessageWidget(QFrame):
 
         return header_widget
 
-    def _create_comic_nameplate(self, name_text):
-        """Create a comic book style nameplate with unified teal styling."""
+    def _create_comic_nameplate(self, name_text, speaker_color=None):
+        """Create a comic book style nameplate colored to match the speaker."""
         from PyQt6.QtWidgets import QSizePolicy
 
+        bg_color = speaker_color or COMIC_COLORS['teal']
         nameplate = QLabel(f"★ {name_text.upper()} ★")
         nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
         nameplate.setFont(QFont("Bangers", 13))
         nameplate.setStyleSheet(f"""
             QLabel {{
-                background-color: {COMIC_COLORS['teal']};
+                background-color: {bg_color};
                 color: white;
                 font-size: 13px;
                 letter-spacing: 2px;
@@ -468,23 +463,21 @@ class MessageWidget(QFrame):
     
     def _setup_user_message(self, text):
         """Setup human user message style with comic book theme."""
-        # Get comic bubble color for human
         bubble_color = get_bubble_color('human')
-        self._bubble_color = bubble_color
-        self._tail_side = 'right'
+        speaker_color = self.HUMAN_COLOR
 
-        # Comic theme: rounded bubble with black border and white background
+        # Comic bubble with thick colored left border to identify speaker
         self.setStyleSheet(f"""
             MessageWidget {{
                 background-color: {bubble_color};
                 border: 3px solid {COMIC_COLORS['black']};
+                border-left: 8px solid {speaker_color};
                 border-radius: 20px;
                 padding: 10px;
             }}
         """)
 
-        # Unified teal nameplate
-        header = self._create_comic_nameplate("You")
+        header = self._create_comic_nameplate("You", speaker_color)
         self.layout().addWidget(header)
 
         # Format code blocks and use RichText
@@ -502,24 +495,23 @@ class MessageWidget(QFrame):
         ai_name = self.message_data.get('ai_name', 'AI')
         model = self.message_data.get('model', '')
 
-        # Get comic bubble color based on model name
+        # Get bubble color and distinct speaker color
         bubble_color = get_bubble_color(model or ai_name)
-        self._bubble_color = bubble_color
-        self._tail_side = 'left'
+        speaker_color = self._get_ai_color()
 
-        # Comic theme: rounded bubble with black border and colored background
+        # Comic bubble with thick colored left border to identify speaker
         self.setStyleSheet(f"""
             MessageWidget {{
                 background-color: {bubble_color};
                 border: 3px solid {COMIC_COLORS['black']};
+                border-left: 8px solid {speaker_color};
                 border-radius: 20px;
                 padding: 10px;
             }}
         """)
 
-        # Unified teal nameplate for all speakers
         display_name = f"{ai_name} ({model})" if model else ai_name
-        header = self._create_comic_nameplate(display_name)
+        header = self._create_comic_nameplate(display_name, speaker_color)
         self.layout().addWidget(header)
 
         # Format code blocks and use RichText
@@ -569,66 +561,6 @@ class MessageWidget(QFrame):
         self.layout().addWidget(content)
         self._content_label = content
     
-    def paintEvent(self, event):
-        """Draw the speech bubble tail triangle for user/AI messages.
-
-        The tail is drawn inside the widget rect, overlapping the rounded border
-        at the bottom-left (AI) or bottom-right (user) of the bubble.
-        """
-        # Let QFrame paint itself first (background, border, rounded corners)
-        super().paintEvent(event)
-
-        if not self._tail_side or not self._bubble_color:
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        tw = 16   # Tail width (horizontal extent from bubble edge)
-        th = 18   # Tail height (vertical extent)
-        bw = 3    # Border width matching the bubble border
-        # Position: 30px up from the bottom of the bubble
-        tail_y = max(self.height() - 45, 30)
-
-        if self._tail_side == 'left':
-            # Tail at bottom-left, pointing down-left (toward portrait column)
-            # The border triangle (drawn first, slightly larger)
-            bx = bw + 10  # Base x — slightly inset from left edge past border-radius
-            painter.setPen(QPen(QColor(COMIC_COLORS['black']), bw))
-            painter.setBrush(QColor(self._bubble_color))
-
-            path = QPainterPath()
-            path.moveTo(bx, tail_y)           # Top of base (on bubble edge)
-            path.lineTo(bx - tw, tail_y + th) # Tip (pointing down-left)
-            path.lineTo(bx, tail_y + th)      # Bottom of base (on bubble edge)
-            path.closeSubpath()
-            painter.drawPath(path)
-
-            # Cover the border line between tail base and bubble interior
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(self._bubble_color))
-            painter.drawRect(bx - 1, tail_y + bw, 4, th - bw * 2)
-
-        elif self._tail_side == 'right':
-            # Tail at bottom-right, pointing down-right
-            bx = self.width() - bw - 10  # Base x — inset from right edge
-            painter.setPen(QPen(QColor(COMIC_COLORS['black']), bw))
-            painter.setBrush(QColor(self._bubble_color))
-
-            path = QPainterPath()
-            path.moveTo(bx, tail_y)              # Top of base
-            path.lineTo(bx + tw, tail_y + th)    # Tip (pointing down-right)
-            path.lineTo(bx, tail_y + th)          # Bottom of base
-            path.closeSubpath()
-            painter.drawPath(path)
-
-            # Cover the border between tail base and bubble interior
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(self._bubble_color))
-            painter.drawRect(bx - 2, tail_y + bw, 4, th - bw * 2)
-
-        painter.end()
-
     def update_content(self, new_text):
         """Update the content of this message (for streaming).
 
