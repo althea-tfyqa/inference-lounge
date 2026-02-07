@@ -91,12 +91,18 @@ class MessageWidget(QFrame):
     HUMAN_COLOR = '#ff00b3'  # Hot Pink/Magenta
     TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
     
+    # Tail dimensions for speech bubble triangles
+    TAIL_WIDTH = 18   # How far the tail sticks out horizontally
+    TAIL_HEIGHT = 20  # Vertical size of the tail triangle
+
     def __init__(self, message_data, parent=None):
         super().__init__(parent)
         self.message_data = message_data
         self._content_label = None  # Reference to content label for updates
+        self._tail_side = None      # 'left' for AI, 'right' for user, None for others
+        self._bubble_color = None   # Fill color for the tail triangle
         self._setup_ui()
-    
+
     def _setup_ui(self):
         """Build the widget UI based on message data."""
         layout = QVBoxLayout(self)
@@ -252,15 +258,15 @@ class MessageWidget(QFrame):
 
         nameplate = QLabel(f"★ {name_text.upper()} ★")
         nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        nameplate.setFont(QFont("Bangers", 13))
         nameplate.setStyleSheet(f"""
             QLabel {{
                 background-color: {COMIC_COLORS['teal']};
                 color: white;
-                font-weight: bold;
-                font-size: 11px;
-                letter-spacing: 1px;
-                padding: 4px 12px;
-                border: 2px solid {COMIC_COLORS['black']};
+                font-size: 13px;
+                letter-spacing: 2px;
+                padding: 5px 14px;
+                border: 3px solid {COMIC_COLORS['black']};
                 border-radius: 4px;
             }}
         """)
@@ -464,6 +470,8 @@ class MessageWidget(QFrame):
         """Setup human user message style with comic book theme."""
         # Get comic bubble color for human
         bubble_color = get_bubble_color('human')
+        self._bubble_color = bubble_color
+        self._tail_side = 'right'
 
         # Comic theme: rounded bubble with black border and white background
         self.setStyleSheet(f"""
@@ -496,6 +504,8 @@ class MessageWidget(QFrame):
 
         # Get comic bubble color based on model name
         bubble_color = get_bubble_color(model or ai_name)
+        self._bubble_color = bubble_color
+        self._tail_side = 'left'
 
         # Comic theme: rounded bubble with black border and colored background
         self.setStyleSheet(f"""
@@ -559,9 +569,69 @@ class MessageWidget(QFrame):
         self.layout().addWidget(content)
         self._content_label = content
     
+    def paintEvent(self, event):
+        """Draw the speech bubble tail triangle for user/AI messages.
+
+        The tail is drawn inside the widget rect, overlapping the rounded border
+        at the bottom-left (AI) or bottom-right (user) of the bubble.
+        """
+        # Let QFrame paint itself first (background, border, rounded corners)
+        super().paintEvent(event)
+
+        if not self._tail_side or not self._bubble_color:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        tw = 16   # Tail width (horizontal extent from bubble edge)
+        th = 18   # Tail height (vertical extent)
+        bw = 3    # Border width matching the bubble border
+        # Position: 30px up from the bottom of the bubble
+        tail_y = max(self.height() - 45, 30)
+
+        if self._tail_side == 'left':
+            # Tail at bottom-left, pointing down-left (toward portrait column)
+            # The border triangle (drawn first, slightly larger)
+            bx = bw + 10  # Base x — slightly inset from left edge past border-radius
+            painter.setPen(QPen(QColor(COMIC_COLORS['black']), bw))
+            painter.setBrush(QColor(self._bubble_color))
+
+            path = QPainterPath()
+            path.moveTo(bx, tail_y)           # Top of base (on bubble edge)
+            path.lineTo(bx - tw, tail_y + th) # Tip (pointing down-left)
+            path.lineTo(bx, tail_y + th)      # Bottom of base (on bubble edge)
+            path.closeSubpath()
+            painter.drawPath(path)
+
+            # Cover the border line between tail base and bubble interior
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(self._bubble_color))
+            painter.drawRect(bx - 1, tail_y + bw, 4, th - bw * 2)
+
+        elif self._tail_side == 'right':
+            # Tail at bottom-right, pointing down-right
+            bx = self.width() - bw - 10  # Base x — inset from right edge
+            painter.setPen(QPen(QColor(COMIC_COLORS['black']), bw))
+            painter.setBrush(QColor(self._bubble_color))
+
+            path = QPainterPath()
+            path.moveTo(bx, tail_y)              # Top of base
+            path.lineTo(bx + tw, tail_y + th)    # Tip (pointing down-right)
+            path.lineTo(bx, tail_y + th)          # Bottom of base
+            path.closeSubpath()
+            painter.drawPath(path)
+
+            # Cover the border between tail base and bubble interior
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(self._bubble_color))
+            painter.drawRect(bx - 2, tail_y + bw, 4, th - bw * 2)
+
+        painter.end()
+
     def update_content(self, new_text):
         """Update the content of this message (for streaming).
-        
+
         For streaming, we use the simple HTML approach since widgets can't be
         efficiently updated incrementally. Full code block widgets are used
         for final rendered messages.
@@ -1056,21 +1126,20 @@ class StartingPromptWidget(QWidget):
         # Editable text field (single line)
         self.text_field = QLineEdit()
         self.text_field.setPlaceholderText("Seed the conversation or just click PROPAGATE...")
-        font = QFont("Iosevka Term", 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        self.text_field.setFont(font)
+        self.text_field.setFont(QFont("Comic Neue", 12))
         self.text_field.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #FFFFFF;
                 color: {COMIC_COLORS['black']};
-                border: 2px solid {COMIC_COLORS['black']};
+                border: 3px solid {COMIC_COLORS['black']};
                 border-radius: 4px;
                 padding: 6px 8px;
+                font-size: 12px;
                 selection-background-color: {COMIC_COLORS['teal']};
                 selection-color: white;
             }}
             QLineEdit:focus {{
-                border: 2px solid {COMIC_COLORS['teal']};
+                border: 3px solid {COMIC_COLORS['teal']};
             }}
         """)
         # Enter key triggers submit
@@ -1147,7 +1216,9 @@ def load_fonts():
         ("IosevkaTerm-Regular.ttf", "Iosevka Term"),
         ("IosevkaTerm-Bold.ttf", "Iosevka Term"),
         ("IosevkaTerm-Italic.ttf", "Iosevka Term"),
-        ("Bangers-Regular.ttf", "Bangers"),  # Comic book display font
+        ("Bangers-Regular.ttf", "Bangers"),          # Comic book display/title font
+        ("ComicNeue-Regular.ttf", "Comic Neue"),     # Comic book body text font
+        ("ComicNeue-Bold.ttf", "Comic Neue"),
     ]
     
     loaded_fonts = []
@@ -1170,6 +1241,69 @@ def load_fonts():
 # ═══════════════════════════════════════════════════════════════════════════════
 # ATMOSPHERIC EFFECT WIDGETS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+class HalftoneOverlay(QWidget):
+    """
+    Transparent overlay that paints Ben-Day halftone dots across the entire window.
+
+    Creates the classic comic book print texture. Mouse events pass through
+    so users can interact with widgets underneath.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Make transparent to mouse events — clicks pass through to widgets below
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
+        # Always on top of sibling widgets
+        self.raise_()
+
+    def paintEvent(self, event):
+        """Paint a grid of tiny semi-transparent dots (Ben-Day dot pattern)."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w, h = self.width(), self.height()
+        dot_spacing = 6     # Pixels between dot centers
+        dot_radius = 0.8    # Radius of each dot
+
+        # Teal dots (offset grid for classic halftone look)
+        teal = QColor(COMIC_COLORS['teal'])
+        teal.setAlpha(18)   # Very subtle
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(teal)
+
+        row = 0
+        y = 0.0
+        while y < h:
+            offset = dot_spacing / 2 if row % 2 else 0  # Offset every other row
+            x = offset
+            while x < w:
+                painter.drawEllipse(int(x), int(y), int(dot_radius * 2), int(dot_radius * 2))
+                x += dot_spacing
+            y += dot_spacing
+            row += 1
+
+        # Pink dots (second layer, offset from teal)
+        pink = QColor(COMIC_COLORS['pink'])
+        pink.setAlpha(12)
+        painter.setBrush(pink)
+
+        row = 0
+        y = dot_spacing / 3
+        while y < h:
+            offset = dot_spacing / 3 if row % 2 else 0
+            x = offset + dot_spacing / 2
+            while x < w:
+                painter.drawEllipse(int(x), int(y), int(dot_radius * 2), int(dot_radius * 2))
+                x += dot_spacing
+            y += dot_spacing
+            row += 1
+
+        painter.end()
+
 
 class DepthGauge(QWidget):
     """Vertical gauge showing conversation depth/turn progress"""
@@ -2955,7 +3089,7 @@ class ConversationPane(QWidget):
         self.entry_panel.setStyleSheet(f"""
             QWidget#entry_panel {{
                 background-color: {COMIC_COLORS['cream']};
-                border: 2px solid {COMIC_COLORS['black']};
+                border: 3px solid {COMIC_COLORS['black']};
                 border-radius: 0px;
             }}
         """)
@@ -2967,7 +3101,7 @@ class ConversationPane(QWidget):
         # Scenario selector
         scenario_row = QHBoxLayout()
         scenario_label = QLabel("Scenario:")
-        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
         scenario_row.addWidget(scenario_label)
 
         self.scenario_selector = NoScrollComboBox()
@@ -2979,7 +3113,7 @@ class ConversationPane(QWidget):
         # Number of AIs selector
         num_ais_row = QHBoxLayout()
         num_ais_label = QLabel("Number of AIs:")
-        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
         num_ais_row.addWidget(num_ais_label)
 
         self.num_ais_selector = NoScrollComboBox()
@@ -3008,9 +3142,8 @@ class ConversationPane(QWidget):
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Set font for the container (cascades to message widgets)
-        font = QFont("Iosevka Term", 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
+        # Set font for the container (cascades to message widgets) — comic book body font
+        font = QFont("Comic Neue", 13)
         self.conversation_display.container.setFont(font)
 
         layout.addWidget(self.conversation_display, 1)  # Gets most space
@@ -3124,7 +3257,7 @@ class ConversationPane(QWidget):
         for i in range(1, num_ais + 1):
             ai_row = QHBoxLayout()
             ai_label = QLabel(f"AI-{i} model:")
-            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
             ai_row.addWidget(ai_label)
 
             # Use GroupedModelComboBox for hierarchical model selection
@@ -4609,53 +4742,63 @@ class LiminalBackroomsApp(QMainWindow):
         # Connect signals and slots
         self.connect_signals()
         
-        # Dark theme
+        # Comic book theme
         self.apply_dark_theme()
-        
+
+        # Halftone dot overlay (subtle Ben-Day print texture over everything)
+        self._halftone_overlay = HalftoneOverlay(self)
+        self._halftone_overlay.lower()  # Start behind, raise after show
+
         # Restore splitter state if available
         self.restore_splitter_state()
-        
+
         # Start maximized
         self.showMaximized()
+
+        # Raise overlay to top after show
+        self._halftone_overlay.raise_()
+        self._halftone_overlay.setGeometry(self.rect())
     
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("─── LIMINAL BACKROOMS v0.7 ───")
+        self.setWindowTitle("Inference Lounge v0.7")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
 
-        # Create menu bar
+        # Create menu bar — comic theme
         menubar = self.menuBar()
         menubar.setStyleSheet(f"""
             QMenuBar {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
+                background-color: {COMIC_COLORS['navy']};
+                color: white;
                 padding: 4px;
-                border-bottom: 1px solid {COLORS['border_glow']};
+                border-bottom: 3px solid {COMIC_COLORS['black']};
+                font-size: 12px;
+                font-weight: bold;
             }}
             QMenuBar::item {{
                 background-color: transparent;
                 padding: 6px 12px;
             }}
             QMenuBar::item:selected {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['accent_cyan']};
+                background-color: {COMIC_COLORS['teal']};
+                color: {COMIC_COLORS['banner_yellow']};
             }}
             QMenu {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
+                background-color: {COMIC_COLORS['cream']};
+                color: {COMIC_COLORS['black']};
+                border: 3px solid {COMIC_COLORS['black']};
             }}
             QMenu::item {{
                 padding: 8px 24px;
             }}
             QMenu::item:selected {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['accent_cyan']};
+                background-color: {COMIC_COLORS['teal']};
+                color: white;
             }}
             QMenu::separator {{
-                height: 1px;
-                background-color: {COLORS['border']};
+                height: 2px;
+                background-color: {COMIC_COLORS['black']};
                 margin: 4px 0px;
             }}
         """)
@@ -5085,6 +5228,13 @@ class LiminalBackroomsApp(QMainWindow):
             selected_text = branch_data.get('selected_text', '')
             self.statusBar().showMessage(f"{branch_type.capitalize()}: {selected_text[:50]}...")
     
+    def resizeEvent(self, event):
+        """Keep halftone overlay covering the full window on resize."""
+        super().resizeEvent(event)
+        if hasattr(self, '_halftone_overlay'):
+            self._halftone_overlay.setGeometry(self.rect())
+            self._halftone_overlay.raise_()
+
     def apply_dark_theme(self):
         """Apply comic book theme to the application"""
         self.setStyleSheet(f"""

@@ -3511,12 +3511,20 @@ def create_gui():
     else:
         print(f"Note: No app icon found at {icon_path}")
     
-    # Load custom fonts (Iosevka Term for better ASCII art rendering)
+    # Load custom fonts (Comic Neue for body, Bangers for titles)
     loaded_fonts = load_fonts()
     if loaded_fonts:
         print(f"Successfully loaded custom fonts: {', '.join(loaded_fonts)}")
     else:
         print("No custom fonts loaded - using system fonts")
+
+    # Set Comic Neue as the default app-wide font for comic book feel
+    from PyQt6.QtGui import QFont
+    if "Comic Neue" in loaded_fonts:
+        app.setFont(QFont("Comic Neue", 12))
+        print("Set app-wide font: Comic Neue 12pt")
+    else:
+        print("Comic Neue not loaded - using system default font")
     
     main_window = LiminalBackroomsApp()
     

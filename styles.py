@@ -532,21 +532,21 @@ def get_comic_combobox_style():
         QComboBox {{
             background-color: #FFFFFF;
             color: {COMIC_COLORS['black']};
-            border: 2px solid {COMIC_COLORS['black']};
+            border: 3px solid {COMIC_COLORS['black']};
             border-radius: 4px;
-            padding: 4px 8px;
-            min-height: 20px;
-            font-size: {FONTS['size_sm']};
+            padding: 5px 10px;
+            min-height: 24px;
+            font-size: 12px;
             font-family: {COMIC_FONTS['family_body']};
         }}
         QComboBox:hover {{
-            border: 2px solid {COMIC_COLORS['teal']};
+            border: 3px solid {COMIC_COLORS['teal']};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
-            width: 20px;
-            border-left: 2px solid {COMIC_COLORS['black']};
+            width: 22px;
+            border-left: 3px solid {COMIC_COLORS['black']};
             border-radius: 0px;
         }}
         QComboBox::down-arrow {{
@@ -557,7 +557,7 @@ def get_comic_combobox_style():
         QComboBox QAbstractItemView {{
             background-color: {COMIC_COLORS['cream']};
             color: {COMIC_COLORS['black']};
-            border: 2px solid {COMIC_COLORS['black']};
+            border: 3px solid {COMIC_COLORS['black']};
             border-radius: 0px;
             padding: 2px;
             outline: none;
@@ -622,11 +622,11 @@ def get_comic_button_style(variant='primary'):
                     stop:0 {COMIC_COLORS['teal']},
                     stop:1 {COMIC_COLORS['teal_dark']});
                 color: white;
-                border: 2px solid {COMIC_COLORS['black']};
-                border-radius: 4px;
-                padding: 8px 14px;
-                font-family: {COMIC_FONTS['family_body']};
-                font-size: 11px;
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 6px;
+                padding: 10px 16px;
+                font-family: {COMIC_FONTS['family_title']};
+                font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 1px;
             }}
@@ -649,11 +649,11 @@ def get_comic_button_style(variant='primary'):
             QPushButton {{
                 background: transparent;
                 color: {COMIC_COLORS['teal']};
-                border: 2px solid {COMIC_COLORS['teal']};
-                border-radius: 4px;
-                padding: 8px 14px;
+                border: 3px solid {COMIC_COLORS['teal']};
+                border-radius: 6px;
+                padding: 10px 16px;
                 font-family: {COMIC_FONTS['family_body']};
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
                 letter-spacing: 1px;
             }}
