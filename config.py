@@ -26,6 +26,14 @@ SORA_SIZE="1280x720"
 # Output directory for conversation HTML files
 OUTPUTS_DIR = "outputs"
 
+# Starting prompts for conversations
+STARTING_PROMPTS = {
+    "Empty (Let AIs Start)": "",
+    "Philosophical": "What is the nature of consciousness and can it be replicated?",
+    "Creative Challenge": "Let's write a story together. Each AI adds exactly one sentence.",
+    "Debate": "Take opposing positions on a topic and debate it thoroughly.",
+}
+
 # Available AI models - Hierarchical structure for GroupedModelComboBox
 # Structure: Tier → Provider → {Display Name: model_id}
 # This is the curated list - will be validated against OpenRouter API if available

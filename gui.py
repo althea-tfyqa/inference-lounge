@@ -26,11 +26,12 @@ import subprocess
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
-from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect, QDialog
 
 from config import (
     AI_MODELS,
     SYSTEM_PROMPT_PAIRS,
+    STARTING_PROMPTS,
     SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
     OUTPUTS_DIR,
     DEVELOPER_TOOLS
@@ -39,8 +40,9 @@ from config import (
 # Import centralized styling - single source of truth for colors and widget styles
 from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
 
-# Import scenario editor dialog
+# Import scenario editor dialog and settings dialog
 from scenario_editor_dialog import ScenarioEditorDialog
+from settings_dialog import SettingsDialog
 
 # Import shared utilities - with fallback for open_html_in_browser
 from shared_utils import generate_image_from_text
@@ -2562,8 +2564,7 @@ class RightSidebar(QWidget):
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.setSpacing(0)
         
-        # Tab buttons
-        self.setup_button = QPushButton("⚙ SETUP")
+        # Tab buttons (SETUP removed - now in Settings dialog)
         self.graph_button = QPushButton("🌐 GRAPH")
         self.image_button = QPushButton("🖼 IMAGES")
         self.video_button = QPushButton("🎬 VIDEOS")
@@ -2592,25 +2593,21 @@ class RightSidebar(QWidget):
             }}
         """
         
-        self.setup_button.setStyleSheet(tab_style)
         self.graph_button.setStyleSheet(tab_style)
         self.image_button.setStyleSheet(tab_style)
         self.video_button.setStyleSheet(tab_style)
-        
+
         # Make buttons checkable for tab behavior
-        self.setup_button.setCheckable(True)
         self.graph_button.setCheckable(True)
         self.image_button.setCheckable(True)
         self.video_button.setCheckable(True)
-        self.setup_button.setChecked(True)  # Start with setup tab active
-        
-        # Connect tab buttons
-        self.setup_button.clicked.connect(lambda: self.switch_tab(0))
-        self.graph_button.clicked.connect(lambda: self.switch_tab(1))
-        self.image_button.clicked.connect(lambda: self.switch_tab(2))
-        self.video_button.clicked.connect(lambda: self.switch_tab(3))
-        
-        tab_layout.addWidget(self.setup_button)
+        self.graph_button.setChecked(True)  # Start with graph tab active
+
+        # Connect tab buttons (indices shifted: 0=graph, 1=images, 2=videos)
+        self.graph_button.clicked.connect(lambda: self.switch_tab(0))
+        self.image_button.clicked.connect(lambda: self.switch_tab(1))
+        self.video_button.clicked.connect(lambda: self.switch_tab(2))
+
         tab_layout.addWidget(self.graph_button)
         tab_layout.addWidget(self.image_button)
         tab_layout.addWidget(self.video_button)
@@ -2627,14 +2624,12 @@ class RightSidebar(QWidget):
             }}
         """)
         
-        # Create tab pages
-        self.control_panel = ControlPanel()
+        # Create tab pages (ControlPanel removed - now in Settings dialog)
         self.network_pane = NetworkPane()
         self.image_preview_pane = ImagePreviewPane()
         self.video_preview_pane = VideoPreviewPane()
-        
-        # Add pages to stack
-        self.stack.addWidget(self.control_panel)
+
+        # Add pages to stack (indices: 0=graph, 1=images, 2=videos)
         self.stack.addWidget(self.network_pane)
         self.stack.addWidget(self.image_preview_pane)
         self.stack.addWidget(self.video_preview_pane)
@@ -2645,14 +2640,13 @@ class RightSidebar(QWidget):
         self.network_pane.nodeSelected.connect(self.nodeSelected)
     
     def switch_tab(self, index):
-        """Switch between tabs"""
+        """Switch between tabs (0=graph, 1=images, 2=videos)"""
         self.stack.setCurrentIndex(index)
-        
+
         # Update button states
-        self.setup_button.setChecked(index == 0)
-        self.graph_button.setChecked(index == 1)
-        self.image_button.setChecked(index == 2)
-        self.video_button.setChecked(index == 3)
+        self.graph_button.setChecked(index == 0)
+        self.image_button.setChecked(index == 1)
+        self.video_button.setChecked(index == 2)
     
     def update_image_preview(self, image_path, ai_name="", prompt=""):
         """Update the image preview pane with a new image"""
@@ -2675,491 +2669,6 @@ class RightSidebar(QWidget):
     def update_graph(self):
         """Forward to network pane"""
         self.network_pane.update_graph()
-
-class ControlPanel(QWidget):
-    """Control panel with mode, model selections, etc."""
-    def __init__(self):
-        super().__init__()
-        
-        # Set up the UI
-        self.setup_ui()
-        
-        # Initialize with models and prompt pairs
-        self.initialize_selectors()
-    
-    def setup_ui(self):
-        """Set up the user interface for the control panel - vertical sidebar layout"""
-        # Main layout
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
-        
-        # Add a title with consistent tab header styling
-        title = QLabel("CONTROL PANEL")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
-            font-size: 13px;
-            font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
-            text-transform: uppercase;
-        """)
-        main_layout.addWidget(title)
-        
-        # Create scrollable area for controls
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                border: none;
-                background-color: transparent;
-            }}
-            {get_scrollbar_style()}
-        """)
-        
-        # Container widget for scrollable content
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet(f"background-color: transparent;")
-        
-        # All controls in vertical layout
-        controls_layout = QVBoxLayout(scroll_content)
-        controls_layout.setContentsMargins(5, 5, 5, 5)
-        controls_layout.setSpacing(10)
-        
-        # Mode selection with icon
-        mode_container = QWidget()
-        mode_layout = QVBoxLayout(mode_container)
-        mode_layout.setContentsMargins(0, 0, 0, 0)
-        mode_layout.setSpacing(5)
-        
-        mode_label = QLabel("▸ MODE")
-        mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        mode_layout.addWidget(mode_label)
-        
-        self.mode_selector = NoScrollComboBox()
-        self.mode_selector.addItems(["AI-AI", "Human-AI"])
-        self.mode_selector.setStyleSheet(get_combobox_style())
-        mode_layout.addWidget(self.mode_selector)
-        
-        # Iterations with slider
-        iterations_container = QWidget()
-        iterations_layout = QVBoxLayout(iterations_container)
-        iterations_layout.setContentsMargins(0, 0, 0, 0)
-        iterations_layout.setSpacing(5)
-        
-        iterations_label = QLabel("▸ ITERATIONS")
-        iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        iterations_layout.addWidget(iterations_label)
-        
-        self.iterations_selector = NoScrollComboBox()
-        self.iterations_selector.addItems(["1", "2", "4", "6", "12", "100"])
-        self.iterations_selector.setStyleSheet(get_combobox_style())
-        iterations_layout.addWidget(self.iterations_selector)
-        
-        # Number of AIs selection
-        num_ais_container = QWidget()
-        num_ais_layout = QVBoxLayout(num_ais_container)
-        num_ais_layout.setContentsMargins(0, 0, 0, 0)
-        num_ais_layout.setSpacing(5)
-        
-        num_ais_label = QLabel("▸ NUMBER OF AIs")
-        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        num_ais_layout.addWidget(num_ais_label)
-        
-        self.num_ais_selector = NoScrollComboBox()
-        self.num_ais_selector.addItems(["1", "2", "3", "4", "5"])
-        self.num_ais_selector.setCurrentText("3")  # Default to 3 AIs
-        self.num_ais_selector.setStyleSheet(get_combobox_style())
-        num_ais_layout.addWidget(self.num_ais_selector)
-        
-        # AI Invite Tier Setting - Button Group
-        invite_tier_container = QWidget()
-        invite_tier_layout = QVBoxLayout(invite_tier_container)
-        invite_tier_layout.setContentsMargins(0, 0, 0, 0)
-        invite_tier_layout.setSpacing(5)
-        
-        invite_tier_label = QLabel("▸ AI INVITE TIER")
-        invite_tier_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        invite_tier_layout.addWidget(invite_tier_label)
-        
-        # Info text
-        invite_tier_info = QLabel("Controls which models AIs can add to the chat")
-        invite_tier_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px;")
-        invite_tier_layout.addWidget(invite_tier_info)
-        
-        # Button group container
-        btn_group_container = QWidget()
-        btn_group_layout = QHBoxLayout(btn_group_container)
-        btn_group_layout.setContentsMargins(0, 0, 0, 0)
-        btn_group_layout.setSpacing(0)
-        
-        # Create toggle buttons
-        self.invite_free_btn = QPushButton("Free")
-        self.invite_paid_btn = QPushButton("Paid")
-        self.invite_both_btn = QPushButton("All")
-        
-        # Store the buttons for easy access
-        self._invite_tier_buttons = [self.invite_free_btn, self.invite_paid_btn, self.invite_both_btn]
-        
-        # Style for toggle buttons
-        toggle_btn_style = f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
-                border: 1px solid {COLORS['border']};
-                padding: 6px 12px;
-                font-size: 10px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
-            }}
-            QPushButton:checked {{
-                background-color: #164E63;
-                color: {COLORS['text_bright']};
-                border: 1px solid {COLORS['accent_cyan']};
-            }}
-        """
-        
-        for btn in self._invite_tier_buttons:
-            btn.setCheckable(True)
-            btn.setStyleSheet(toggle_btn_style)
-            btn.clicked.connect(self._on_invite_tier_clicked)
-            btn_group_layout.addWidget(btn)
-        
-        # Round corners on first and last buttons
-        self.invite_free_btn.setStyleSheet(toggle_btn_style + """
-            QPushButton { border-radius: 3px 0px 0px 3px; }
-        """)
-        self.invite_both_btn.setStyleSheet(toggle_btn_style + """
-            QPushButton { border-radius: 0px 3px 3px 0px; }
-        """)
-        
-        # Set default selection (Free)
-        self.invite_free_btn.setChecked(True)
-        
-        # Tooltips
-        self.invite_free_btn.setToolTip("AIs can only invite free models")
-        self.invite_paid_btn.setToolTip("AIs can only invite paid models")
-        self.invite_both_btn.setToolTip("AIs can invite any model")
-        
-        invite_tier_layout.addWidget(btn_group_container)
-        
-        # Allow duplicate models checkbox
-        self.allow_duplicate_models_checkbox = QCheckBox("Allow duplicate models")
-        self.allow_duplicate_models_checkbox.setChecked(False)  # Default to restricted
-        self.allow_duplicate_models_checkbox.setStyleSheet(get_checkbox_style())
-        self.allow_duplicate_models_checkbox.setToolTip("Allow AIs to add models that are already in the conversation")
-        invite_tier_layout.addWidget(self.allow_duplicate_models_checkbox)
-        
-        # AI-1 Model selection
-        self.ai1_container = QWidget()
-        ai1_layout = QVBoxLayout(self.ai1_container)
-        ai1_layout.setContentsMargins(0, 0, 0, 0)
-        ai1_layout.setSpacing(5)
-        
-        ai1_label = QLabel("AI-1")
-        ai1_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai1_layout.addWidget(ai1_label)
-        
-        self.ai1_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-        self.ai1_model_selector.setStyleSheet(get_combobox_style())
-        ai1_layout.addWidget(self.ai1_model_selector)
-        
-        # AI-2 Model selection
-        self.ai2_container = QWidget()
-        ai2_layout = QVBoxLayout(self.ai2_container)
-        ai2_layout.setContentsMargins(0, 0, 0, 0)
-        ai2_layout.setSpacing(5)
-        
-        ai2_label = QLabel("AI-2")
-        ai2_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai2_layout.addWidget(ai2_label)
-        
-        self.ai2_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-        self.ai2_model_selector.setStyleSheet(get_combobox_style())
-        ai2_layout.addWidget(self.ai2_model_selector)
-        
-        # AI-3 Model selection
-        self.ai3_container = QWidget()
-        ai3_layout = QVBoxLayout(self.ai3_container)
-        ai3_layout.setContentsMargins(0, 0, 0, 0)
-        ai3_layout.setSpacing(5)
-        
-        ai3_label = QLabel("AI-3")
-        ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai3_layout.addWidget(ai3_label)
-        
-        self.ai3_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-        self.ai3_model_selector.setStyleSheet(get_combobox_style())
-        ai3_layout.addWidget(self.ai3_model_selector)
-        
-        # AI-4 Model selection
-        self.ai4_container = QWidget()
-        ai4_layout = QVBoxLayout(self.ai4_container)
-        ai4_layout.setContentsMargins(0, 0, 0, 0)
-        ai4_layout.setSpacing(5)
-        
-        ai4_label = QLabel("AI-4")
-        ai4_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai4_layout.addWidget(ai4_label)
-        
-        self.ai4_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-        self.ai4_model_selector.setStyleSheet(get_combobox_style())
-        ai4_layout.addWidget(self.ai4_model_selector)
-        
-        # AI-5 Model selection
-        self.ai5_container = QWidget()
-        ai5_layout = QVBoxLayout(self.ai5_container)
-        ai5_layout.setContentsMargins(0, 0, 0, 0)
-        ai5_layout.setSpacing(5)
-        
-        ai5_label = QLabel("AI-5")
-        ai5_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai5_layout.addWidget(ai5_label)
-        
-        self.ai5_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-        self.ai5_model_selector.setStyleSheet(get_combobox_style())
-        ai5_layout.addWidget(self.ai5_model_selector)
-        
-        # Prompt pair selection
-        prompt_container = QWidget()
-        prompt_layout = QVBoxLayout(prompt_container)
-        prompt_layout.setContentsMargins(0, 0, 0, 0)
-        prompt_layout.setSpacing(5)
-        
-        prompt_label = QLabel("Conversation Scenario")
-        prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        prompt_layout.addWidget(prompt_label)
-        
-        self.prompt_pair_selector = NoScrollComboBox()
-        self.prompt_pair_selector.setStyleSheet(get_combobox_style())
-        prompt_layout.addWidget(self.prompt_pair_selector)
-        
-        # Add all controls directly to controls_layout (now vertical)
-        controls_layout.addWidget(mode_container)
-        controls_layout.addWidget(iterations_container)
-        controls_layout.addWidget(num_ais_container)
-        controls_layout.addWidget(invite_tier_container)
-        
-        # Divider
-        divider1 = QLabel("─" * 20)
-        divider1.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
-        controls_layout.addWidget(divider1)
-        
-        models_label = QLabel("▸ AI MODELS")
-        models_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        controls_layout.addWidget(models_label)
-        
-        controls_layout.addWidget(self.ai1_container)
-        controls_layout.addWidget(self.ai2_container)
-        controls_layout.addWidget(self.ai3_container)
-        controls_layout.addWidget(self.ai4_container)
-        controls_layout.addWidget(self.ai5_container)
-        
-        # Divider
-        divider2 = QLabel("─" * 20)
-        divider2.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
-        controls_layout.addWidget(divider2)
-        
-        scenario_label = QLabel("▸ SCENARIO")
-        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        controls_layout.addWidget(scenario_label)
-
-        controls_layout.addWidget(prompt_container)
-
-        # Edit Scenarios button
-        self.edit_scenarios_btn = QPushButton("Edit Scenarios")
-        self.edit_scenarios_btn.setStyleSheet(get_button_style(COLORS['accent_purple']))
-        self.edit_scenarios_btn.setToolTip("Create, edit, rename, and delete conversation scenarios")
-        self.edit_scenarios_btn.clicked.connect(self.open_scenario_editor)
-        controls_layout.addWidget(self.edit_scenarios_btn)
-
-        # Divider
-        divider3 = QLabel("─" * 20)
-        divider3.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
-        controls_layout.addWidget(divider3)
-        
-        # OPTIONS section (in scrollable area)
-        options_label = QLabel("▸ OPTIONS")
-        options_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        controls_layout.addWidget(options_label)
-        
-        # Auto-generate images checkbox
-        self.auto_image_checkbox = QCheckBox("Create images from responses")
-        self.auto_image_checkbox.setStyleSheet(get_checkbox_style())
-        self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
-        controls_layout.addWidget(self.auto_image_checkbox)
-        
-        # Add spacer to push content to top
-        controls_layout.addStretch()
-        
-        # Set the scroll area widget and add to main layout
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area, 1)  # Stretch to fill
-        
-        # ═══ STICKY FOOTER: ACTIONS ONLY ═══
-        # This stays visible at bottom regardless of scroll position
-        action_container = QWidget()
-        action_container.setObjectName("actionFooter")
-        action_container.setStyleSheet(f"""
-            QWidget#actionFooter {{
-                background-color: transparent;
-                border-top: 1px solid {COLORS['border_glow']};
-            }}
-        """)
-        action_layout = QVBoxLayout(action_container)
-        action_layout.setContentsMargins(10, 8, 10, 8)
-        action_layout.setSpacing(8)
-        
-        # Actions - buttons in vertical layout
-        actions_label = QLabel("▸ ACTIONS")
-        actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px; background: transparent; border: none;")
-        action_layout.addWidget(actions_label)
-        
-        # Export button
-        self.export_button = QPushButton("📡 EXPORT")
-        self.export_button.setStyleSheet(get_button_style(COLORS['accent_purple']))
-        action_layout.addWidget(self.export_button)
-        
-        # View HTML button - opens the styled conversation
-        self.view_html_button = QPushButton("🌐 VIEW HTML")
-        self.view_html_button.setStyleSheet(get_button_style(COLORS['accent_green']))
-        self.view_html_button.clicked.connect(self._open_current_html)
-        action_layout.addWidget(self.view_html_button)
-
-        # BackroomsBench evaluation button
-        self.backroomsbench_button = QPushButton("🌀 BACKROOMSBENCH (beta)")
-        self.backroomsbench_button.setStyleSheet(get_button_style(COLORS['accent_purple']))
-        self.backroomsbench_button.setToolTip("Run multi-judge AI evaluation (depth/philosophy)")
-        action_layout.addWidget(self.backroomsbench_button)
-
-        main_layout.addWidget(action_container)  # Sticky at bottom
-    
-    # NOTE: get_combobox_style() has been moved to styles.py
-    # Use the imported get_combobox_style() function instead of get_combobox_style()
-    
-    # NOTE: get_cyberpunk_button_style() has been moved to styles.py as get_button_style()
-    # Use the imported get_button_style() function instead of self.get_cyberpunk_button_style()
-    
-    def create_glow_button(self, text, accent_color):
-        """Create a button with glow effect"""
-        button = GlowButton(text, accent_color)
-        button.setStyleSheet(get_button_style(accent_color))
-        return button
-    
-    def _on_invite_tier_clicked(self):
-        """Handle invite tier button clicks - ensure only one is selected"""
-        clicked_btn = self.sender()
-        for btn in self._invite_tier_buttons:
-            if btn != clicked_btn:
-                btn.setChecked(False)
-        # Ensure at least one is always selected
-        if not clicked_btn.isChecked():
-            clicked_btn.setChecked(True)
-    
-    def get_ai_invite_tier(self):
-        """Get the current AI invite tier setting"""
-        if self.invite_free_btn.isChecked():
-            return "Free"
-        elif self.invite_paid_btn.isChecked():
-            return "Paid"
-        else:
-            return "Both"
-    
-    def initialize_selectors(self):
-        """Initialize the selector dropdowns with values from config"""
-        # AI model selectors are GroupedModelComboBox instances that self-populate
-        # from config.AI_MODELS - no need to manually add items here
-        
-        # Add prompt pairs
-        self.prompt_pair_selector.clear()
-        self.prompt_pair_selector.addItems(list(SYSTEM_PROMPT_PAIRS.keys()))
-        
-        # Connect number of AIs selector to update visibility
-        self.num_ais_selector.currentTextChanged.connect(self.update_ai_selector_visibility)
-        
-        # Set initial visibility based on default number of AIs (3)
-        self.update_ai_selector_visibility("3")
-    
-    def update_ai_selector_visibility(self, num_ais_text):
-        """Show/hide AI model selectors based on number of AIs selected"""
-        num_ais = int(num_ais_text)
-        
-        # AI-1 is always visible
-        # AI-2 visible if num_ais >= 2
-        # AI-3 visible if num_ais >= 3
-        # AI-4 visible if num_ais >= 4
-        # AI-5 visible if num_ais >= 5
-        
-        self.ai1_container.setVisible(num_ais >= 1)
-        self.ai2_container.setVisible(num_ais >= 2)
-        self.ai3_container.setVisible(num_ais >= 3)
-        self.ai4_container.setVisible(num_ais >= 4)
-        self.ai5_container.setVisible(num_ais >= 5)
-    
-    def _open_current_html(self):
-        """Open the current session's HTML file in browser"""
-        try:
-            # Get main window to access current_html_file
-            main_window = self.window()
-            current_file = getattr(main_window, 'current_html_file', None)
-            
-            if current_file and os.path.exists(current_file):
-                open_html_file(current_file)
-            else:
-                # Fallback: try to find the most recent conversation file in outputs
-                from config import OUTPUTS_DIR
-                import glob
-                
-                pattern = os.path.join(OUTPUTS_DIR, "conversation_*.html")
-                files = glob.glob(pattern)
-                
-                if files:
-                    # Get the most recent file
-                    latest_file = max(files, key=os.path.getmtime)
-                    open_html_file(latest_file)
-                else:
-                    # No files found
-                    from PyQt6.QtWidgets import QMessageBox
-                    QMessageBox.information(
-                        self,
-                        "No Conversation",
-                        "No conversation HTML file found.\nStart a conversation first."
-                    )
-        except Exception as e:
-            import traceback
-            print(f"[ERROR] Error opening HTML file: {e}")
-            traceback.print_exc()
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error", f"Error opening HTML file:\n{e}")
-
-    def open_scenario_editor(self):
-        """Open the scenario editor dialog"""
-        dialog = ScenarioEditorDialog(self)
-        result = dialog.exec()
-
-        # If user saved changes (dialog.accept() was called)
-        if result == dialog.DialogCode.Accepted:
-            # Refresh the scenario dropdown to show updated list
-            # Note: This doesn't reload the scenarios from config.py - user must restart app for that
-            # But we can at least show a helpful message
-            QMessageBox.information(
-                self,
-                "Restart Required",
-                "Scenarios saved successfully!\n\n"
-                "Restart the application to use the updated scenarios."
-            )
-
-            # Optional: Refresh the dropdown list (won't have new content until restart, but shows something changed)
-            # This would require reloading SYSTEM_PROMPT_PAIRS from config
-            # For now, we keep it simple and just show the restart message
 
 class ConversationContextMenu(QMenu):
     """Context menu for the conversation display"""
@@ -3300,7 +2809,7 @@ class ConversationPane(QWidget):
             padding: 4px;
             letter-spacing: 2px;
         """)
-        
+
         self.info_label = QLabel("[ AI-TO-AI CONVERSATION ]")
         self.info_label.setStyleSheet(f"""
             color: {COLORS['text_glow']};
@@ -3308,12 +2817,23 @@ class ConversationPane(QWidget):
             padding: 2px;
             letter-spacing: 1px;
         """)
-        
+
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
         title_layout.addWidget(self.info_label)
-        
+
         layout.addLayout(title_layout)
+
+        # Config status display - shows current settings
+        self.config_status_label = QLabel("")
+        self.config_status_label.setStyleSheet(f"""
+            color: {COLORS['text_dim']};
+            font-size: 10px;
+            padding: 2px 4px;
+            font-style: italic;
+        """)
+        self.config_status_label.setWordWrap(True)
+        layout.addWidget(self.config_status_label)
         
         # Conversation display (widget-based chat scroll area)
         # Each message is a separate widget - no setHtml() means no scroll jumping!
@@ -3350,7 +2870,29 @@ class ConversationPane(QWidget):
         label_row_layout.addWidget(self.input_token_counter)
 
         input_layout.addWidget(label_row)
-        
+
+        # Starting prompt selector
+        prompt_selector_layout = QHBoxLayout()
+        prompt_selector_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_selector_layout.setSpacing(8)
+
+        prompt_label = QLabel("Starting prompt:")
+        prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        prompt_selector_layout.addWidget(prompt_label)
+
+        self.prompt_selector = NoScrollComboBox()
+        self.prompt_selector.addItem("(Type your own)")
+        # Load from config.STARTING_PROMPTS
+        for prompt_name in sorted(STARTING_PROMPTS.keys()):
+            self.prompt_selector.addItem(prompt_name)
+        self.prompt_selector.addItem("─────────────────")  # Separator
+        self.prompt_selector.addItem("⚙ Manage Prompts...")
+        self.prompt_selector.setStyleSheet(get_combobox_style())
+        self.prompt_selector.currentTextChanged.connect(self._on_prompt_selected)
+        prompt_selector_layout.addWidget(self.prompt_selector, 1)  # Stretch to fill
+
+        input_layout.addLayout(prompt_selector_layout)
+
         # Input field with modern styling
         self.input_field = QTextEdit()
         self.input_field.setPlaceholderText("Seed the conversation or just click propagate...")
@@ -3668,7 +3210,39 @@ class ConversationPane(QWidget):
     def set_fork_callback(self, callback):
         """Set callback function for fork creation"""
         self.fork_callback = callback
-    
+
+    def update_config_status(self, mode, scenario, iterations, num_ais):
+        """Update the configuration status display"""
+        # Truncate scenario name if too long
+        display_scenario = scenario[:30] + "..." if len(scenario) > 30 else scenario
+        text = f"[Mode: {mode} | Scenario: {display_scenario} | {iterations} turns | {num_ais} AIs]"
+        self.config_status_label.setText(text)
+
+    def _on_prompt_selected(self, prompt_name):
+        """Handle starting prompt selection"""
+        if prompt_name == "⚙ Manage Prompts...":
+            # Open Settings dialog to Prompts tab
+            if hasattr(self.parent(), 'open_settings_dialog'):
+                parent_app = self.parent()
+                # Find the LiminalBackroomsApp (might be grandparent)
+                while parent_app and not hasattr(parent_app, 'open_settings_dialog'):
+                    parent_app = parent_app.parent()
+                if parent_app:
+                    parent_app.open_settings_dialog()
+                    # TODO: Open directly to Prompts tab
+            # Reset dropdown to previous selection
+            self.prompt_selector.setCurrentIndex(0)
+        elif prompt_name == "─────────────────":
+            # Separator - reset to first item
+            self.prompt_selector.setCurrentIndex(0)
+        elif prompt_name == "(Type your own)":
+            # Do nothing - let user type
+            pass
+        elif prompt_name in STARTING_PROMPTS:
+            # Load prompt text into input field
+            prompt_text = STARTING_PROMPTS[prompt_name]
+            self.input_field.setPlainText(prompt_text)
+
     # =========================================================================
     # SCROLL MANAGEMENT
     # =========================================================================
@@ -4855,6 +4429,16 @@ class LiminalBackroomsApp(QMainWindow):
         self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.current_html_file = None  # Will be set when conversation starts
         
+        # Settings state (moved from ControlPanel to app instance variables)
+        self.conversation_mode = "AI-AI"
+        self.max_iterations = 4
+        self.num_ais = 3
+        self.ai_models = ["anthropic/claude-opus-4.5"] * 5  # List of 5 model IDs
+        self.current_scenario = list(SYSTEM_PROMPT_PAIRS.keys())[0] if SYSTEM_PROMPT_PAIRS else ""
+        self.invite_tier = "Free"
+        self.auto_image = False
+        self.allow_duplicate_models = False
+
         # Main app state
         self.conversation = []
         self.turn_count = 0
@@ -4884,7 +4468,70 @@ class LiminalBackroomsApp(QMainWindow):
         self.setWindowTitle("╔═ LIMINAL BACKROOMS v0.7 ═╗")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
-        
+
+        # Create menu bar
+        menubar = self.menuBar()
+        menubar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                padding: 4px;
+                border-bottom: 1px solid {COLORS['border_glow']};
+            }}
+            QMenuBar::item {{
+                background-color: transparent;
+                padding: 6px 12px;
+            }}
+            QMenuBar::item:selected {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['accent_cyan']};
+            }}
+            QMenu {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border_glow']};
+            }}
+            QMenu::item {{
+                padding: 8px 24px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['accent_cyan']};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {COLORS['border']};
+                margin: 4px 0px;
+            }}
+        """)
+
+        file_menu = menubar.addMenu("File")
+
+        # Settings action
+        settings_action = file_menu.addAction("⚙ Settings...")
+        settings_action.triggered.connect(self.open_settings_dialog)
+        settings_action.setShortcut("Ctrl+,")
+
+        file_menu.addSeparator()
+
+        # Export actions (moved from ControlPanel Export tab)
+        export_action = file_menu.addAction("Export Conversation...")
+        export_action.triggered.connect(self.export_conversation)
+
+        view_html_action = file_menu.addAction("View as HTML")
+        view_html_action.triggered.connect(self.view_conversation_html)
+
+        file_menu.addSeparator()
+
+        bench_action = file_menu.addAction("Run BackroomsBench Evaluation...")
+        bench_action.triggered.connect(self.run_backroomsbench_evaluation)
+
+        file_menu.addSeparator()
+
+        quit_action = file_menu.addAction("Quit")
+        quit_action.triggered.connect(self.close)
+        quit_action.setShortcut("Ctrl+Q")
+
         # Create central widget - this will be a custom widget that paints the background
         self.central_container = CentralContainer()
         self.setCentralWidget(self.central_container)
@@ -4924,9 +4571,9 @@ class LiminalBackroomsApp(QMainWindow):
         self.splitter.addWidget(self.left_pane)
         self.splitter.addWidget(self.right_sidebar)
         
-        # Set initial splitter sizes (70:30 ratio - more space for conversation)
+        # Set initial splitter sizes (85:15 ratio - maximum space for inference lounge)
         total_width = 1600  # Based on default window width
-        self.splitter.setSizes([int(total_width * 0.70), int(total_width * 0.30)])
+        self.splitter.setSizes([int(total_width * 0.85), int(total_width * 0.15)])
         
         # Initialize main conversation as root node
         self.right_sidebar.add_node('main', 'Seed', 'main')
@@ -5041,21 +4688,14 @@ class LiminalBackroomsApp(QMainWindow):
         if hasattr(self.right_sidebar.network_pane.network_view, 'nodeHovered'):
             self.right_sidebar.network_pane.network_view.nodeHovered.connect(self.on_node_hover)
         
-        # Export button
-        self.right_sidebar.control_panel.export_button.clicked.connect(self.export_conversation)
-
-        # BackroomsBench evaluation button
-        self.right_sidebar.control_panel.backroomsbench_button.clicked.connect(self.run_backroomsbench_evaluation)
+        # Export and BackroomsBench buttons are now in File menu (connected in setup_ui)
 
         # Connect context menu actions to the main app methods
         self.left_pane.set_rabbithole_callback(self.branch_from_selection)
         self.left_pane.set_fork_callback(self.fork_from_selection)
-        
+
         # Save splitter state when it moves
         self.splitter.splitterMoved.connect(self.save_splitter_state)
-        
-        # Connect mode selector to update info label
-        self.right_sidebar.control_panel.mode_selector.currentTextChanged.connect(self.on_mode_changed)
     
     def on_mode_changed(self, mode):
         """Update the info label when conversation mode changes"""
@@ -5104,6 +4744,71 @@ class LiminalBackroomsApp(QMainWindow):
         """Export the current conversation"""
         self.left_pane.export_conversation()
 
+    def view_conversation_html(self):
+        """View the current conversation as HTML in browser"""
+        if self.current_html_file and os.path.exists(self.current_html_file):
+            try:
+                import webbrowser
+                webbrowser.open(f"file://{os.path.abspath(self.current_html_file)}")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to open HTML file: {str(e)}")
+        else:
+            QMessageBox.information(self, "No Conversation", "No conversation has been generated yet. Start a conversation first!")
+
+    def open_settings_dialog(self):
+        """Open the settings dialog and apply changes if saved"""
+        # Gather current settings
+        current_settings = {
+            'mode': self.conversation_mode,
+            'iterations': self.max_iterations,
+            'num_ais': self.num_ais,
+            'ai_models': self.ai_models.copy(),
+            'scenario': self.current_scenario,
+            'invite_tier': self.invite_tier,
+            'auto_image': self.auto_image,
+            'allow_duplicate_models': self.allow_duplicate_models,
+        }
+
+        # Show settings dialog
+        dialog = SettingsDialog(self, current_settings)
+        result = dialog.exec()
+
+        if result == QDialog.DialogCode.Accepted:
+            new_settings = dialog.get_settings()
+            self._apply_settings(new_settings)
+
+    def _apply_settings(self, settings):
+        """Apply settings from the settings dialog to the app state"""
+        # Update app state
+        self.conversation_mode = settings['mode']
+        self.max_iterations = settings['iterations']
+        self.num_ais = settings['num_ais']
+        self.ai_models = settings['ai_models']
+        self.current_scenario = settings['scenario']
+        self.invite_tier = settings['invite_tier']
+        self.auto_image = settings['auto_image']
+        self.allow_duplicate_models = settings['allow_duplicate_models']
+
+        # Update UI elements
+        # Update config status display in ConversationPane
+        if hasattr(self, 'left_pane') and hasattr(self.left_pane, 'update_config_status'):
+            self.left_pane.update_config_status(
+                self.conversation_mode,
+                self.current_scenario,
+                self.max_iterations,
+                self.num_ais
+            )
+
+        # Update button text based on mode
+        if hasattr(self, 'left_pane') and hasattr(self.left_pane, 'send_button'):
+            if self.conversation_mode == "Human-AI":
+                self.left_pane.send_button.setText("Send")
+            else:
+                self.left_pane.send_button.setText("Propagate")
+
+        # Show confirmation
+        self.statusBar().showMessage(f"Settings updated: {self.conversation_mode} mode, {self.num_ais} AIs, {self.max_iterations} iterations", 3000)
+
     def run_backroomsbench_evaluation(self):
         """Run BackroomsBench multi-judge evaluation on current session."""
         from PyQt6.QtWidgets import QMessageBox, QProgressDialog
@@ -5127,23 +4832,19 @@ class LiminalBackroomsApp(QMainWindow):
             )
             return
 
-        # Get scenario name from UI
-        scenario_name = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        # Get scenario name from app state
+        scenario_name = self.current_scenario
 
-        # Get participant models based on number of active AIs
-        num_ais = int(self.right_sidebar.control_panel.num_ais_selector.currentText())
+        # Get participant models from app state
+        num_ais = self.num_ais
         participant_models = []
-        model_selectors = [
-            self.right_sidebar.control_panel.ai1_model_selector,
-            self.right_sidebar.control_panel.ai2_model_selector,
-            self.right_sidebar.control_panel.ai3_model_selector,
-            self.right_sidebar.control_panel.ai4_model_selector,
-            self.right_sidebar.control_panel.ai5_model_selector,
-        ]
 
+        # Convert model IDs to display names for the report
+        from config import get_display_name
         for i in range(num_ais):
-            model_text = model_selectors[i].currentText()
-            participant_models.append(model_text)
+            model_id = self.ai_models[i]
+            display_name = get_display_name(model_id)
+            participant_models.append(display_name)
 
         # Show progress dialog
         progress = QProgressDialog(
@@ -5446,9 +5147,9 @@ class LiminalBackroomsApp(QMainWindow):
                         self.splitter.setSizes(state['sizes'])
         except Exception as e:
             print(f"Error restoring splitter state: {e}")
-            # Fall back to default sizes
+            # Fall back to default sizes (85:15 for maximum lounge space)
             total_width = self.width()
-            self.splitter.setSizes([int(total_width * 0.7), int(total_width * 0.3)])
+            self.splitter.setSizes([int(total_width * 0.85), int(total_width * 0.15)])
 
     def process_branch_conversation(self, branch_id):
         """Process the branch conversation using the selected models"""

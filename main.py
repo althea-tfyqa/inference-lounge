@@ -1104,11 +1104,11 @@ class ConversationManager:
             # Update the HTML conversation document when user adds a message
             self.update_conversation_html(self.app.main_conversation)
         
-        # Get number of AIs from UI
-        num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
-        
-        # Get selected prompt pair
-        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        # Get number of AIs from app state
+        num_ais = self.app.num_ais
+
+        # Get selected scenario from app state
+        selected_prompt_pair = self.app.current_scenario
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -1121,7 +1121,7 @@ class ConversationManager:
         self._request_start_time = time.time()
         
         # Reset turn count ONLY if this is a new conversation or explicit user input
-        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
+        max_iterations = self.app.max_iterations
         if user_input is not None or not self.app.main_conversation:
             self.app.turn_count = 0
             print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations and {num_ais} AIs")
@@ -1159,8 +1159,8 @@ class ConversationManager:
             model = self.get_model_for_ai(i)
             prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair][ai_name]
             
-            # Get invite tier setting
-            invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+            # Get invite tier setting from app state
+            invite_tier = self.app.invite_tier
 
             worker = Worker(ai_name, self.app.main_conversation, model, prompt, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
             worker.signals.started.connect(self.on_ai_started)
@@ -1246,12 +1246,12 @@ class ConversationManager:
             else:
                 conversation = self.app.main_conversation
             
-            selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
+            selected_prompt_pair = self.app.current_scenario
             
             # Now update the selector to reflect all pending AIs joining
             # This is the correct time to update - when they actually join, not when invited
-            final_count = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText()) + len(pending)
-            self.app.right_sidebar.control_panel.num_ais_selector.setCurrentText(str(final_count))
+            final_count = self.app.num_ais + len(pending)
+            self.app.num_ais = final_count
             print(f"[Agent] Updated AI count to {final_count}")
             
             # Build all workers first, then chain them properly
@@ -1271,7 +1271,7 @@ class ConversationManager:
                 print(f"[Agent] Creating worker for newly added {ai_name} ({model})")
                 
                 # Get invite tier setting
-                invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+                invite_tier = self.app.invite_tier
 
                 worker = Worker(ai_name, conversation.copy(), model, prompt, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
                 worker.signals.started.connect(self.on_ai_started)
@@ -1333,7 +1333,7 @@ class ConversationManager:
                 # Last one - finish turn completion
                 print(f"[Agent]   This is the last pending worker")
                 max_iterations = getattr(self, '_pending_max_iterations', 
-                    int(self.app.right_sidebar.control_panel.iterations_selector.currentText()))
+                    self.app.max_iterations)
                 worker.signals.finished.connect(lambda mi=max_iterations: self._finish_turn_completion(mi))
             
             time.sleep(TURN_DELAY)
@@ -1343,7 +1343,7 @@ class ConversationManager:
             # No more pending workers, finish turn
             print(f"[Agent] No remaining pending workers, finishing turn")
             max_iterations = getattr(self, '_pending_max_iterations',
-                int(self.app.right_sidebar.control_panel.iterations_selector.currentText()))
+                self.app.max_iterations)
             self._finish_turn_completion(max_iterations)
     
     def _finish_turn_completion(self, max_iterations=1):
@@ -1499,10 +1499,10 @@ class ConversationManager:
             self.update_conversation_html(conversation)
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
-        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        ai_1_model = self.app.ai_models[0]
+        ai_2_model = self.app.ai_models[1]
+        ai_3_model = self.app.ai_models[2]
+        selected_prompt_pair = self.app.current_scenario
         
         # Check if we've already had AI responses in this branch
         has_ai_responses = False
@@ -1537,10 +1537,10 @@ class ConversationManager:
             print("Resetting turn count - starting new conversation")
         
         # Get max iterations
-        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
+        max_iterations = self.app.max_iterations
         
         # Get invite tier setting
-        invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        invite_tier = self.app.invite_tier
         
         # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
@@ -1643,7 +1643,7 @@ class ConversationManager:
         print(f"[Typing] {ai_name} ({model}) started processing")
         
         # Update iteration counter with current AI
-        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
+        max_iterations = self.app.max_iterations
         current_turn = getattr(self.app, 'turn_count', 0) + 1
         self.app.update_iteration(current_turn, max_iterations, ai_name)
         
@@ -1892,7 +1892,7 @@ class ConversationManager:
         if isinstance(result, dict) and "content" in result and not "image_url" in result:
             response_content = result.get("content", "")
             if response_content and len(response_content.strip()) > 20:
-                if hasattr(self.app.right_sidebar.control_panel, 'auto_image_checkbox') and self.app.right_sidebar.control_panel.auto_image_checkbox.isChecked():
+                if self.app.auto_image:
                     self.app.left_pane.append_text("\nGenerating an image based on this response...\n", "system")
                     self.generate_and_display_image(response_content, ai_name)
         
@@ -2195,7 +2195,7 @@ class ConversationManager:
         
         # Get the base number of AIs from the selector (this is the starting count for this round)
         # We DON'T update the selector until the AI actually joins - just track pending count
-        base_num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
+        base_num_ais = self.app.num_ais
         pending_count = len(getattr(self, '_pending_ais', []))
         
         # The effective count is base + pending (selector is NOT updated during pending phase)
@@ -2207,13 +2207,14 @@ class ConversationManager:
         new_num = effective_count + 1
         
         # Get tier setting FIRST - we need this to guide model matching
-        invite_tier_setting = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        invite_tier_setting = self.app.invite_tier
         print(f"[Agent] Processing !add_ai '{model_name}' with tier setting: {invite_tier_setting}")
         
         # Try to set the model for the new AI slot
         actual_model_id = None  # Track the actual model ID
         actual_display_name = model_name  # Track display name for messages
-        selector = getattr(self.app.right_sidebar.control_panel, f'ai{new_num}_model_selector', None)
+        # Access model from app state instead of selector
+        # selector = None  # No longer using selectors
         
         if selector:
             # Smart matching: prefer models from the allowed tier
@@ -2287,10 +2288,11 @@ class ConversationManager:
         
         # Check if this model is already an active AI (deduplication)
         # Check setting for whether duplicates are allowed
-        allow_duplicates = getattr(self.app.right_sidebar.control_panel, 'allow_duplicate_models_checkbox', None)
+        allow_duplicates = self.app.allow_duplicate_models
         if allow_duplicates and not allow_duplicates.isChecked():
             for i in range(1, base_num_ais + 1):
-                existing_selector = getattr(self.app.right_sidebar.control_panel, f'ai{i}_model_selector', None)
+                # Get existing model from app state
+                existing_model_id = self.app.ai_models[i-1] if i <= len(self.app.ai_models) else None
                 if existing_selector:
                     existing_model_id = existing_selector.get_selected_model_id()
                     if existing_model_id and actual_model_id:
@@ -2480,17 +2482,11 @@ class ConversationManager:
     
     def get_model_for_ai(self, ai_number):
         """Get the selected model ID for the AI by number (1-5)"""
-        selectors = {
-            1: self.app.right_sidebar.control_panel.ai1_model_selector,
-            2: self.app.right_sidebar.control_panel.ai2_model_selector,
-            3: self.app.right_sidebar.control_panel.ai3_model_selector,
-            4: self.app.right_sidebar.control_panel.ai4_model_selector,
-            5: self.app.right_sidebar.control_panel.ai5_model_selector
-        }
-        selector = selectors.get(ai_number, selectors[1])
-        # Use get_selected_model_id() to get the actual model ID, not display name
-        model_id = selector.get_selected_model_id()
-        return model_id if model_id else selector.currentText()  # Fallback to text if no ID
+        # Get model ID directly from app state (ai_models list)
+        if 1 <= ai_number <= len(self.app.ai_models):
+            return self.app.ai_models[ai_number - 1]
+        # Fallback to first model
+        return self.app.ai_models[0] if self.app.ai_models else "anthropic/claude-opus-4.5"    # Fallback to text if no ID
 
     def get_prompt_additions_for_ai(self, ai_name: str) -> str:
         """Get all prompt additions for a specific AI as a formatted string."""
@@ -2739,10 +2735,10 @@ class ConversationManager:
             # No need to update display since message is hidden
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
-        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        ai_1_model = self.app.ai_models[0]
+        ai_2_model = self.app.ai_models[1]
+        ai_3_model = self.app.ai_models[2]
+        selected_prompt_pair = self.app.current_scenario
         
         # Check if we've already had AI responses in this branch
         has_ai_responses = False
@@ -2780,10 +2776,10 @@ class ConversationManager:
             print("Resetting turn count - starting new conversation")
         
         # Get max iterations
-        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
+        max_iterations = self.app.max_iterations
         
         # Get invite tier setting
-        invite_tier = self.app.right_sidebar.control_panel.get_ai_invite_tier()
+        invite_tier = self.app.invite_tier
         
         # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app, invite_tier=invite_tier, prompt_modifications=self.ai_prompt_additions, ai_temperatures=self.ai_temperatures)
