@@ -511,6 +511,169 @@ def get_menu_style():
 
 
 # =============================================================================
+# COMIC THEME - Widget Style Generators
+# =============================================================================
+
+# Color mapping for GroupedModelComboBox (expects cyberpunk-style keys).
+# Maps those keys to comic theme equivalents so the delegate renders in-theme.
+COMIC_COLORS_FULL = {
+    'bg_dark': COMIC_COLORS['cream'],           # Dropdown list background
+    'bg_medium': '#FFFFFF',                      # Combo box background (white)
+    'bg_light': '#EDE4D4',                       # Hover highlight
+    'text_bright': COMIC_COLORS['black'],        # Bold text
+    'text_normal': '#333333',                    # Normal text
+    'accent_cyan': COMIC_COLORS['teal'],         # Accent color (teal instead of cyan)
+}
+
+
+def get_comic_combobox_style():
+    """Get comic-themed combobox style — cream/white background, black borders, teal accents."""
+    return f"""
+        QComboBox {{
+            background-color: #FFFFFF;
+            color: {COMIC_COLORS['black']};
+            border: 2px solid {COMIC_COLORS['black']};
+            border-radius: 4px;
+            padding: 4px 8px;
+            min-height: 20px;
+            font-size: {FONTS['size_sm']};
+            font-family: {COMIC_FONTS['family_body']};
+        }}
+        QComboBox:hover {{
+            border: 2px solid {COMIC_COLORS['teal']};
+        }}
+        QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 20px;
+            border-left: 2px solid {COMIC_COLORS['black']};
+            border-radius: 0px;
+        }}
+        QComboBox::down-arrow {{
+            width: 12px;
+            height: 12px;
+            image: none;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {COMIC_COLORS['cream']};
+            color: {COMIC_COLORS['black']};
+            border: 2px solid {COMIC_COLORS['black']};
+            border-radius: 0px;
+            padding: 2px;
+            outline: none;
+        }}
+        QComboBox QAbstractItemView::item {{
+            min-height: 22px;
+            padding: 2px 4px;
+            padding-left: 8px;
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: {COMIC_COLORS['teal']};
+            color: white;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: #EDE4D4;
+            color: {COMIC_COLORS['black']};
+        }}
+    """
+
+
+def get_comic_button_style(variant='primary'):
+    """
+    Get comic-themed button style.
+
+    Args:
+        variant: 'primary' (red/yellow), 'secondary' (teal/white), or 'subtle' (transparent/teal)
+    """
+    if variant == 'primary':
+        return f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COMIC_COLORS['banner_red']},
+                    stop:1 {COMIC_COLORS['banner_red_dark']});
+                color: {COMIC_COLORS['banner_yellow']};
+                border: 3px solid {COMIC_COLORS['black']};
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-family: {COMIC_FONTS['family_title']};
+                font-size: 14px;
+                font-weight: bold;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #F04A57,
+                    stop:1 {COMIC_COLORS['banner_red']});
+            }}
+            QPushButton:pressed {{
+                background: {COMIC_COLORS['banner_red_dark']};
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+                border-color: #999999;
+            }}
+        """
+    elif variant == 'secondary':
+        return f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COMIC_COLORS['teal']},
+                    stop:1 {COMIC_COLORS['teal_dark']});
+                color: white;
+                border: 2px solid {COMIC_COLORS['black']};
+                border-radius: 4px;
+                padding: 8px 14px;
+                font-family: {COMIC_FONTS['family_body']};
+                font-size: 11px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #35B8A8,
+                    stop:1 {COMIC_COLORS['teal']});
+            }}
+            QPushButton:pressed {{
+                background: {COMIC_COLORS['teal_dark']};
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+                border-color: #999999;
+            }}
+        """
+    else:  # subtle
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {COMIC_COLORS['teal']};
+                border: 2px solid {COMIC_COLORS['teal']};
+                border-radius: 4px;
+                padding: 8px 14px;
+                font-family: {COMIC_FONTS['family_body']};
+                font-size: 11px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: {COMIC_COLORS['teal']};
+                color: white;
+            }}
+            QPushButton:pressed {{
+                background: {COMIC_COLORS['teal_dark']};
+                color: white;
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+                color: #AAAAAA;
+                border-color: #CCCCCC;
+            }}
+        """
+
+
+# =============================================================================
 # COMPLETE APPLICATION STYLESHEET
 # =============================================================================
 

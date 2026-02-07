@@ -40,7 +40,9 @@ from config import (
 )
 
 # Import centralized styling - single source of truth for colors and widget styles
-from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style, get_bubble_color, get_portrait_path, COMIC_COLORS
+from styles import (COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style,
+                     get_scrollbar_style, get_bubble_color, get_portrait_path, COMIC_COLORS,
+                     COMIC_COLORS_FULL, COMIC_FONTS, get_comic_combobox_style, get_comic_button_style)
 from thinking_bubble_widget import ThinkingBubbleWithLabel
 from portrait_column_widget import PortraitColumnWidget
 
@@ -524,34 +526,34 @@ class MessageWidget(QFrame):
         """Setup system message style."""
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-left: 3px solid {COLORS['text_dim']};
+                background-color: #F0EDE8;
+                border-left: 3px solid {COMIC_COLORS['navy']};
                 border-radius: 0px;
             }}
         """)
-        
+
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
         content = QLabel(formatted_text)
-        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-style: italic;")
+        content.setStyleSheet(f"background-color: transparent; color: {COMIC_COLORS['navy']}; font-style: italic;")
         content.setWordWrap(True)
         content.setTextFormat(Qt.TextFormat.RichText)
         self.layout().addWidget(content)
         self._content_label = content
-    
+
     def _setup_default_message(self, text):
         """Default message style."""
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: {COLORS['bg_medium']};
+                background-color: {COMIC_COLORS['cream']};
                 border-radius: 0px;
             }}
         """)
-        
+
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
         content = QLabel(formatted_text)
-        content.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']};")
+        content.setStyleSheet(f"background-color: transparent; color: {COMIC_COLORS['black']};")
         content.setWordWrap(True)
         content.setTextFormat(Qt.TextFormat.RichText)
         self.layout().addWidget(content)
@@ -1036,7 +1038,7 @@ class StartingPromptWidget(QWidget):
 
         # Label
         label = QLabel("Starting prompt:")
-        label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 11px; font-weight: bold;")
         layout.addWidget(label)
 
         # Prompt dropdown
@@ -1046,7 +1048,7 @@ class StartingPromptWidget(QWidget):
             self.prompt_selector.addItem(prompt_name)
         self.prompt_selector.addItem("─────────────────")  # Separator
         self.prompt_selector.addItem("⚙ Manage Prompts...")
-        self.prompt_selector.setStyleSheet(get_combobox_style())
+        self.prompt_selector.setStyleSheet(get_comic_combobox_style())
         self.prompt_selector.setMaximumWidth(200)
         self.prompt_selector.currentTextChanged.connect(self._on_prompt_selected)
         layout.addWidget(self.prompt_selector)
@@ -1059,17 +1061,16 @@ class StartingPromptWidget(QWidget):
         self.text_field.setFont(font)
         self.text_field.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
+                background-color: #FFFFFF;
+                color: {COMIC_COLORS['black']};
+                border: 2px solid {COMIC_COLORS['black']};
+                border-radius: 4px;
                 padding: 6px 8px;
-                selection-background-color: {COLORS['accent_cyan']};
-                selection-color: {COLORS['bg_dark']};
+                selection-background-color: {COMIC_COLORS['teal']};
+                selection-color: white;
             }}
             QLineEdit:focus {{
-                border: 1px solid {COLORS['accent_cyan']};
-                color: {COLORS['text_bright']};
+                border: 2px solid {COMIC_COLORS['teal']};
             }}
         """)
         # Enter key triggers submit
@@ -1080,7 +1081,7 @@ class StartingPromptWidget(QWidget):
 
         # Token counter
         self.token_counter = QLabel("~0 tokens")
-        self.token_counter.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        self.token_counter.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 10px;")
         self.token_counter.setMinimumWidth(70)
         layout.addWidget(self.token_counter)
 
@@ -1932,12 +1933,12 @@ class NetworkPane(QWidget):
         title = QLabel("PROPAGATION NETWORK")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
+            color: {COMIC_COLORS['banner_yellow']};
             font-size: 13px;
             font-weight: bold;
             padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
+            background-color: {COMIC_COLORS['navy']};
+            border-bottom: 2px solid {COMIC_COLORS['black']};
             letter-spacing: 3px;
             text-transform: uppercase;
         """)
@@ -2111,22 +2112,22 @@ class ImagePreviewPane(QWidget):
         self.title = QLabel("GENERATED IMAGES")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
+            color: {COMIC_COLORS['banner_yellow']};
             font-size: 13px;
             font-weight: bold;
             padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
+            background-color: {COMIC_COLORS['navy']};
+            border-bottom: 2px solid {COMIC_COLORS['black']};
             letter-spacing: 3px;
             text-transform: uppercase;
         """)
         layout.addWidget(self.title)
-        
+
         # AI name label (below title)
         self.ai_label = QLabel("")
         self.ai_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_bright']};
+                color: white;
                 font-size: 10px;
                 font-weight: bold;
                 padding: 2px 5px;
@@ -2134,12 +2135,12 @@ class ImagePreviewPane(QWidget):
         """)
         self.ai_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.ai_label)
-        
+
         # Prompt label (below AI name)
         self.prompt_label = QLabel("")
         self.prompt_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 11px;
                 font-style: italic;
                 padding: 2px 5px;
@@ -2148,14 +2149,14 @@ class ImagePreviewPane(QWidget):
         self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.prompt_label.setWordWrap(True)
         layout.addWidget(self.prompt_label)
-        
+
         # Image display label
         self.image_label = QLabel("No images generated yet")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(f"""
             QLabel {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
+                background-color: {COMIC_COLORS['navy']};
+                color: #AABBCC;
                 padding: 20px;
                 min-height: 200px;
             }}
@@ -2170,24 +2171,7 @@ class ImagePreviewPane(QWidget):
         
         # Previous button
         self.prev_button = QPushButton("◀ Prev")
-        self.prev_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
+        self.prev_button.setStyleSheet(get_comic_button_style('subtle'))
         self.prev_button.clicked.connect(self.show_previous)
         self.prev_button.setEnabled(False)
         nav_layout.addWidget(self.prev_button)
@@ -2196,7 +2180,7 @@ class ImagePreviewPane(QWidget):
         self.position_label = QLabel("")
         self.position_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 11px;
             }}
         """)
@@ -2205,24 +2189,7 @@ class ImagePreviewPane(QWidget):
         
         # Next button
         self.next_button = QPushButton("Next ▶")
-        self.next_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
+        self.next_button.setStyleSheet(get_comic_button_style('subtle'))
         self.next_button.clicked.connect(self.show_next)
         self.next_button.setEnabled(False)
         nav_layout.addWidget(self.next_button)
@@ -2355,8 +2322,8 @@ class ImagePreviewPane(QWidget):
         self.image_label.setText("No images generated yet")
         self.image_label.setStyleSheet(f"""
             QLabel {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
+                background-color: {COMIC_COLORS['navy']};
+                color: #AABBCC;
                 padding: 20px;
                 min-height: 200px;
             }}
@@ -2405,22 +2372,22 @@ class VideoPreviewPane(QWidget):
         self.title = QLabel("GENERATED VIDEOS")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
+            color: {COMIC_COLORS['banner_yellow']};
             font-size: 13px;
             font-weight: bold;
             padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
+            background-color: {COMIC_COLORS['navy']};
+            border-bottom: 2px solid {COMIC_COLORS['black']};
             letter-spacing: 3px;
             text-transform: uppercase;
         """)
         layout.addWidget(self.title)
-        
+
         # AI name label (below title)
         self.ai_label = QLabel("")
         self.ai_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_bright']};
+                color: white;
                 font-size: 10px;
                 font-weight: bold;
                 padding: 2px 5px;
@@ -2428,12 +2395,12 @@ class VideoPreviewPane(QWidget):
         """)
         self.ai_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.ai_label)
-        
+
         # Prompt label (below AI name)
         self.prompt_label = QLabel("")
         self.prompt_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 11px;
                 font-style: italic;
                 padding: 2px 5px;
@@ -2448,8 +2415,8 @@ class VideoPreviewPane(QWidget):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet(f"""
             QLabel {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
+                background-color: {COMIC_COLORS['navy']};
+                color: #AABBCC;
                 padding: 20px;
                 min-height: 150px;
             }}
@@ -2458,25 +2425,8 @@ class VideoPreviewPane(QWidget):
         layout.addWidget(self.video_label, 1)
         
         # Play button
-        self.play_button = QPushButton("▶ Play Video")
-        self.play_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['accent_cyan']};
-                color: {COLORS['bg_dark']};
-                border: none;
-                border-radius: 0px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['accent_purple']};
-            }}
-            QPushButton:disabled {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
-            }}
-        """)
+        self.play_button = QPushButton("Play Video")
+        self.play_button.setStyleSheet(get_comic_button_style('secondary'))
         self.play_button.clicked.connect(self.play_current_video)
         self.play_button.setEnabled(False)
         layout.addWidget(self.play_button)
@@ -2487,24 +2437,7 @@ class VideoPreviewPane(QWidget):
         
         # Previous button
         self.prev_button = QPushButton("◀ Prev")
-        self.prev_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
+        self.prev_button.setStyleSheet(get_comic_button_style('subtle'))
         self.prev_button.clicked.connect(self.show_previous)
         self.prev_button.setEnabled(False)
         nav_layout.addWidget(self.prev_button)
@@ -2513,7 +2446,7 @@ class VideoPreviewPane(QWidget):
         self.position_label = QLabel("")
         self.position_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 11px;
             }}
         """)
@@ -2522,24 +2455,7 @@ class VideoPreviewPane(QWidget):
         
         # Next button
         self.next_button = QPushButton("Next ▶")
-        self.next_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
+        self.next_button.setStyleSheet(get_comic_button_style('subtle'))
         self.next_button.clicked.connect(self.show_next)
         self.next_button.setEnabled(False)
         nav_layout.addWidget(self.next_button)
@@ -2722,26 +2638,26 @@ class RightSidebar(QWidget):
         tab_container = QWidget()
         tab_container.setStyleSheet(f"""
             QWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-bottom: 1px solid {COLORS['border_glow']};
+                background-color: {COMIC_COLORS['navy']};
+                border-bottom: 2px solid {COMIC_COLORS['black']};
             }}
         """)
         tab_layout = QHBoxLayout(tab_container)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.setSpacing(0)
-        
+
         # Tab buttons (SETUP removed - now in Settings dialog)
-        self.graph_button = QPushButton("🌐 GRAPH")
-        self.image_button = QPushButton("🖼 IMAGES")
-        self.video_button = QPushButton("🎬 VIDEOS")
-        
-        # Cyberpunk tab button styling
+        self.graph_button = QPushButton("GRAPH")
+        self.image_button = QPushButton("IMAGES")
+        self.video_button = QPushButton("VIDEOS")
+
+        # Comic book tab button styling
         tab_style = f"""
             QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
+                background-color: {COMIC_COLORS['navy']};
+                color: #AABBCC;
                 border: none;
-                border-bottom: 2px solid transparent;
+                border-bottom: 3px solid transparent;
                 padding: 12px 12px;
                 font-weight: bold;
                 font-size: 10px;
@@ -2749,13 +2665,13 @@ class RightSidebar(QWidget):
                 text-transform: uppercase;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
+                background-color: {COMIC_COLORS['teal_dark']};
+                color: white;
             }}
             QPushButton:checked {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['accent_cyan']};
-                border-bottom: 2px solid {COLORS['accent_cyan']};
+                background-color: {COMIC_COLORS['teal']};
+                color: {COMIC_COLORS['banner_yellow']};
+                border-bottom: 3px solid {COMIC_COLORS['banner_yellow']};
             }}
         """
         
@@ -2785,7 +2701,7 @@ class RightSidebar(QWidget):
         self.stack = QStackedWidget()
         self.stack.setStyleSheet(f"""
             QStackedWidget {{
-                background-color: {COLORS['bg_dark']};
+                background-color: {COMIC_COLORS['navy']};
                 border: none;
             }}
         """)
@@ -3038,8 +2954,8 @@ class ConversationPane(QWidget):
         self.entry_panel = QWidget()
         self.entry_panel.setStyleSheet(f"""
             QWidget#entry_panel {{
-                background-color: {COLORS['bg_medium']};
-                border: 1px solid {COLORS['border_glow']};
+                background-color: {COMIC_COLORS['cream']};
+                border: 2px solid {COMIC_COLORS['black']};
                 border-radius: 0px;
             }}
         """)
@@ -3051,25 +2967,25 @@ class ConversationPane(QWidget):
         # Scenario selector
         scenario_row = QHBoxLayout()
         scenario_label = QLabel("Scenario:")
-        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
         scenario_row.addWidget(scenario_label)
 
         self.scenario_selector = NoScrollComboBox()
         self.scenario_selector.addItems(sorted(SYSTEM_PROMPT_PAIRS.keys()))
-        self.scenario_selector.setStyleSheet(get_combobox_style())
+        self.scenario_selector.setStyleSheet(get_comic_combobox_style())
         scenario_row.addWidget(self.scenario_selector, 1)
         entry_layout.addLayout(scenario_row)
 
         # Number of AIs selector
         num_ais_row = QHBoxLayout()
         num_ais_label = QLabel("Number of AIs:")
-        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
         num_ais_row.addWidget(num_ais_label)
 
         self.num_ais_selector = NoScrollComboBox()
         self.num_ais_selector.addItems(["2", "3", "4", "5"])
         self.num_ais_selector.setCurrentText("3")  # Default
-        self.num_ais_selector.setStyleSheet(get_combobox_style())
+        self.num_ais_selector.setStyleSheet(get_comic_combobox_style())
         num_ais_row.addWidget(self.num_ais_selector, 1)
         entry_layout.addLayout(num_ais_row)
 
@@ -3114,111 +3030,21 @@ class ConversationPane(QWidget):
         button_layout.setSpacing(5)
 
         # Upload image button (hidden in viewing mode)
-        self.upload_image_button = QPushButton("📎 IMAGE")
-        self.upload_image_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-                min-width: 70px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border: 1px solid {COLORS['accent_cyan']};
-                color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['border_glow']};
-            }}
-        """)
+        self.upload_image_button = QPushButton("IMAGE")
+        self.upload_image_button.setStyleSheet(get_comic_button_style('subtle'))
         self.upload_image_button.setToolTip("Upload an image to include in your message")
 
         # Clear button (hidden in viewing mode)
         self.clear_button = QPushButton("CLEAR")
-        self.clear_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-                min-width: 70px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border: 1px solid {COLORS['accent_pink']};
-                color: {COLORS['accent_pink']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['border_glow']};
-            }}
-        """)
+        self.clear_button.setStyleSheet(get_comic_button_style('subtle'))
 
-        # Submit button with cyberpunk styling and glow effect
-        self.submit_button = GlowButton("⚡ PROPAGATE", COLORS['accent_cyan'])
-        self.submit_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['accent_cyan']};
-                color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['accent_cyan']};
-                border-radius: 0px;
-                padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['accent_cyan']};
-                border: 1px solid {COLORS['accent_cyan']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['accent_cyan_active']};
-                color: {COLORS['text_bright']};
-            }}
-            QPushButton:disabled {{
-                background-color: {COLORS['border']};
-                color: {COLORS['text_dim']};
-                border: 1px solid {COLORS['border']};
-            }}
-        """)
+        # Submit button — bold comic primary style
+        self.submit_button = GlowButton("PROPAGATE", COMIC_COLORS['banner_red'])
+        self.submit_button.setStyleSheet(get_comic_button_style('primary'))
 
         # Reset button - clears conversation context (no glow)
-        self.reset_button = QPushButton("↺ RESET")
-        self.reset_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {COLORS['accent_pink']};
-                border: 1px solid {COLORS['accent_pink']};
-                border-radius: 0px;
-                padding: 8px 14px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['accent_pink']};
-                color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['accent_pink']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['accent_pink']};
-                color: {COLORS['text_bright']};
-            }}
-            QPushButton:disabled {{
-                background-color: transparent;
-                color: {COLORS['text_dim']};
-                border: 1px solid {COLORS['border']};
-            }}
-        """)
+        self.reset_button = QPushButton("RESET")
+        self.reset_button.setStyleSheet(get_comic_button_style('secondary'))
         self.reset_button.setToolTip("Clear conversation and start fresh")
 
         # Layout: IMAGE | CLEAR | stretch | RESET | PROPAGATE
@@ -3298,12 +3124,12 @@ class ConversationPane(QWidget):
         for i in range(1, num_ais + 1):
             ai_row = QHBoxLayout()
             ai_label = QLabel(f"AI-{i} model:")
-            ai_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 12px; font-weight: bold; min-width: 100px;")
+            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 12px; font-weight: bold; min-width: 100px;")
             ai_row.addWidget(ai_label)
 
             # Use GroupedModelComboBox for hierarchical model selection
-            ai_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-            ai_model_selector.setStyleSheet(get_combobox_style())
+            ai_model_selector = GroupedModelComboBox(colors=COMIC_COLORS_FULL, parent=self)
+            ai_model_selector.setStyleSheet(get_comic_combobox_style())
             ai_row.addWidget(ai_model_selector, 1)
 
             self.ai_assignments_layout.addLayout(ai_row)
@@ -4876,15 +4702,15 @@ class LiminalBackroomsApp(QMainWindow):
         self.splitter.setChildrenCollapsible(False)  # Prevent panes from being collapsed
         self.splitter.setStyleSheet(f"""
             QSplitter::handle {{
-                background-color: {COLORS['border_highlight']};
+                background-color: {COMIC_COLORS['black']};
                 border: none;
-                margin: 2px 0px;
+                margin: 0px;
             }}
             QSplitter::handle:hover {{
-                background-color: {COLORS['border_glow']};
+                background-color: {COMIC_COLORS['teal']};
             }}
             QSplitter::handle:pressed {{
-                background-color: {COLORS['accent_cyan']};
+                background-color: {COMIC_COLORS['banner_red']};
             }}
         """)
         main_layout.addWidget(self.splitter)
@@ -4921,23 +4747,23 @@ class LiminalBackroomsApp(QMainWindow):
         # ═══ SIGNAL INDICATOR ═══
         self.signal_indicator = SignalIndicator()
         
-        # Status bar with modern styling
+        # Status bar — comic theme
         self.statusBar().setStyleSheet(f"""
             QStatusBar {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_dim']};
-                border-top: 1px solid {COLORS['border']};
+                background-color: {COMIC_COLORS['navy']};
+                color: #AABBCC;
+                border-top: 2px solid {COMIC_COLORS['black']};
                 padding: 3px;
                 font-size: 11px;
             }}
         """)
         self.statusBar().showMessage("Ready")
-        
+
         # Add notification label for agent actions (shows latest notification)
         self.notification_label = QLabel("")
         self.notification_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['accent_cyan']};
+                color: {COMIC_COLORS['banner_yellow']};
                 font-size: 11px;
                 padding: 2px 10px;
                 background-color: transparent;
@@ -4945,27 +4771,27 @@ class LiminalBackroomsApp(QMainWindow):
         """)
         self.notification_label.setMaximumWidth(500)
         self.statusBar().addWidget(self.notification_label, 1)
-        
+
         # ═══ ITERATION COUNTER ═══
         self.iteration_label = QLabel("")
         self.iteration_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 11px;
                 padding: 2px 10px;
                 background-color: transparent;
             }}
         """)
         self.statusBar().addPermanentWidget(self.iteration_label)
-        
+
         # Add signal indicator to status bar
         self.statusBar().addPermanentWidget(self.signal_indicator)
-        
+
         # ═══ CRT TOGGLE CHECKBOX ═══
         self.crt_checkbox = QCheckBox("CRT")
         self.crt_checkbox.setStyleSheet(f"""
             QCheckBox {{
-                color: {COLORS['text_dim']};
+                color: #AABBCC;
                 font-size: 10px;
                 spacing: 6px;
                 margin-left: 12px;
@@ -4974,11 +4800,11 @@ class LiminalBackroomsApp(QMainWindow):
             QCheckBox::indicator {{
                 width: 12px;
                 height: 12px;
-                border: 1px solid {COLORS['border_glow']};
-                background: {COLORS['bg_dark']};
+                border: 1px solid {COMIC_COLORS['teal']};
+                background: {COMIC_COLORS['navy']};
             }}
             QCheckBox::indicator:checked {{
-                background: {COLORS['accent_cyan']};
+                background: {COMIC_COLORS['teal']};
             }}
         """)
         self.crt_checkbox.setToolTip("Toggle CRT scanline effect")
@@ -5260,20 +5086,20 @@ class LiminalBackroomsApp(QMainWindow):
             self.statusBar().showMessage(f"{branch_type.capitalize()}: {selected_text[:50]}...")
     
     def apply_dark_theme(self):
-        """Apply dark theme to the application"""
+        """Apply comic book theme to the application"""
         self.setStyleSheet(f"""
             QMainWindow {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_normal']};
+                background-color: {COMIC_COLORS['gold']};
+                color: {COMIC_COLORS['black']};
             }}
             QWidget {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_normal']};
+                background-color: {COMIC_COLORS['gold']};
+                color: {COMIC_COLORS['black']};
             }}
             QToolTip {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COMIC_COLORS['cream']};
+                color: {COMIC_COLORS['black']};
+                border: 2px solid {COMIC_COLORS['black']};
                 padding: 5px;
             }}
         """)
