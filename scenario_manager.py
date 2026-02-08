@@ -273,7 +273,8 @@ class ScenarioManager:
         before = original_content[:start_idx]
         after = original_content[end_idx:]
 
-        return before + new_dict_content + after
+        # Ensure proper spacing: add newline after the generated dict
+        return before + new_dict_content + "\n" + after
 
     @classmethod
     def save_scenarios(cls, scenarios: Dict[str, Dict[str, str]], create_backup: bool = True) -> Tuple[bool, Optional[str]]:
