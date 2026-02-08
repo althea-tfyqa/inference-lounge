@@ -180,9 +180,10 @@ class PortraitColumnWidget(QWidget):
         """
         Args:
             participants: List of tuples (model_name, character_name, speaker_color)
+                         or (ai_name, model_name, character_name, speaker_color)
         """
         super().__init__(parent)
-        self.portrait_cards = {}  # Map character_name -> PortraitCard
+        self.portrait_cards = {}  # Map ai_name -> PortraitCard
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 20, 10, 20)
@@ -207,21 +208,38 @@ class PortraitColumnWidget(QWidget):
             for args in participants:
                 self.add_participant(*args)
 
-    def add_participant(self, model_name, character_name, speaker_color=None):
-        """Add a participant portrait to the column."""
-        if character_name not in self.portrait_cards:
+    def add_participant(self, *args):
+        """
+        Add a participant portrait to the column.
+
+        Accepts either:
+            - (model_name, character_name, speaker_color) - legacy format, uses character_name as key
+            - (ai_name, model_name, character_name, speaker_color) - new format with stable ai_name key
+        """
+        if len(args) == 4:
+            # New format: (ai_name, model_name, character_name, speaker_color)
+            ai_name, model_name, character_name, speaker_color = args
+        elif len(args) == 3:
+            # Legacy format: (model_name, character_name, speaker_color)
+            # Use character_name as ai_name for backwards compatibility
+            model_name, character_name, speaker_color = args
+            ai_name = character_name
+        else:
+            raise ValueError(f"add_participant expects 3 or 4 arguments, got {len(args)}")
+
+        if ai_name not in self.portrait_cards:
             card = PortraitCard(
                 model_name, character_name,
                 speaker_color=speaker_color,
                 portrait_size=90
             )
-            self.portrait_cards[character_name] = card
+            self.portrait_cards[ai_name] = card
             self.layout().addWidget(card)
 
-    def set_active_speaker(self, character_name):
-        """Highlight the active speaker, dim others."""
+    def set_active_speaker(self, ai_name):
+        """Highlight the active speaker by ai_name, dim others."""
         for name, card in self.portrait_cards.items():
-            card.set_active(name == character_name)
+            card.set_active(name == ai_name)
 
     def clear_active_speaker(self):
         """Remove highlighting from all portraits."""

@@ -30,6 +30,10 @@ from config import (
     get_model_tier_by_id,
     get_display_name
 )
+from scenario_manager import (
+    get_ai_slots, get_num_ais, get_prompt, get_model, get_name,
+    get_default_prompt, DEFAULT_MODEL
+)
 from shared_utils import (
     call_claude_api,
     call_openrouter_api,
@@ -1159,7 +1163,7 @@ class ConversationManager:
                 continue
             
             model = self.get_model_for_ai(i)
-            prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair][ai_name]
+            prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], ai_name)
             
             # Get invite tier setting from app state
             invite_tier = self.app.invite_tier
@@ -1267,8 +1271,8 @@ class ConversationManager:
                 if persona:
                     prompt = f"You are {ai_name}. {persona}\n\nYou are interfacing with other AIs. Engage authentically."
                 else:
-                    prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair].get(ai_name, 
-                        SYSTEM_PROMPT_PAIRS[selected_prompt_pair].get("AI-1", ""))
+                    prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], ai_name) or \
+                             get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-1")
                 
                 print(f"[Agent] Creating worker for newly added {ai_name} ({model})")
                 
@@ -1525,9 +1529,9 @@ class ConversationManager:
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
-            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-1"]
-            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-2"]
-            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-3"]
+            ai_1_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-1")
+            ai_2_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-2")
+            ai_3_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-3")
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -1745,7 +1749,11 @@ class ConversationManager:
             # Get the speaker color that matches the message border color
             speaker_color = MessageWidget.AI_COLORS.get(i, MessageWidget.AI_COLORS[1])
 
-            participants.append((provider_model, ai_name, speaker_color))
+            # Get display name from scenario (falls back to AI-1, AI-2, etc. automatically)
+            display_name = get_name(SYSTEM_PROMPT_PAIRS.get(self.app.current_scenario, {}), ai_name)
+
+            # Store as (ai_name, model_name, display_name, color) for new portrait format
+            participants.append((ai_name, provider_model, display_name, speaker_color))
 
         # Clear and rebuild portrait column
         for card in list(self.app.portrait_column.portrait_cards.values()):
@@ -1753,11 +1761,11 @@ class ConversationManager:
             card.deleteLater()
         self.app.portrait_column.portrait_cards.clear()
 
-        # Add new portraits with matching speaker colors
+        # Add new portraits with ai_name as stable key
         print(f"[Portrait Column] Adding {len(participants)} participants:")
-        for model_name, char_name, color in participants:
-            print(f"  - {char_name}: {model_name} (color: {color})")
-            self.app.portrait_column.add_participant(model_name, char_name, color)
+        for ai_name, model_name, char_name, color in participants:
+            print(f"  - {ai_name} ({char_name}): {model_name} (color: {color})")
+            self.app.portrait_column.add_participant(ai_name, model_name, char_name, color)
         print(f"[Portrait Column] Total portraits now: {len(self.app.portrait_column.portrait_cards)}")
 
     def _set_active_speaker(self, ai_name, model):
@@ -2809,7 +2817,7 @@ class ConversationManager:
         # Determine which prompts to use based on branch type and response history
         branch_type = branch_data.get('type', 'branch')
         selected_text = branch_data.get('selected_text', '')
-        
+
         if branch_type.lower() == 'rabbithole' and ai_response_count < 2:
             # Initial rabbitholing prompt - only for the first exchange
             print("Using rabbithole-specific prompt for initial exploration")
@@ -2820,9 +2828,9 @@ class ConversationManager:
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
-            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-1"]
-            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-2"]
-            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-3"]
+            ai_1_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-1")
+            ai_2_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-2")
+            ai_3_prompt = get_prompt(SYSTEM_PROMPT_PAIRS[selected_prompt_pair], "AI-3")
         
         # Start loading animation
         self.app.left_pane.start_loading()

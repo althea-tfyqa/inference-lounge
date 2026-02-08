@@ -60,6 +60,9 @@ except ImportError:
 # Add import for grouped model selector functionality
 from grouped_model_selector import GroupedModelComboBox
 
+# Import scenario manager helpers
+from scenario_manager import get_ai_slots, get_num_ais, get_prompt, get_model, get_name, DEFAULT_MODEL
+
 
 # =============================================================================
 # MESSAGE WIDGET CHAT SYSTEM - Each message is a separate widget
@@ -3008,29 +3011,6 @@ class ConversationPane(QWidget):
         scenario_row.addWidget(self.scenario_selector, 1)
         entry_layout.addLayout(scenario_row)
 
-        # Number of AIs selector
-        num_ais_row = QHBoxLayout()
-        num_ais_label = QLabel("Number of AIs:")
-        num_ais_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
-        num_ais_row.addWidget(num_ais_label)
-
-        self.num_ais_selector = NoScrollComboBox()
-        self.num_ais_selector.addItems(["2", "3", "4", "5"])
-        self.num_ais_selector.setCurrentText("3")  # Default
-        self.num_ais_selector.setStyleSheet(get_comic_combobox_style())
-        num_ais_row.addWidget(self.num_ais_selector, 1)
-        entry_layout.addLayout(num_ais_row)
-
-        # AI model assignments container (populated dynamically by _populate_ai_assignments)
-        self.ai_assignments_container = QWidget()
-        self.ai_assignments_layout = QVBoxLayout(self.ai_assignments_container)
-        self.ai_assignments_layout.setContentsMargins(0, 0, 0, 0)
-        self.ai_assignments_layout.setSpacing(8)
-        entry_layout.addWidget(self.ai_assignments_container)
-
-        # Store AI model selectors (list of GroupedModelComboBox instances)
-        self.ai_model_selectors = []
-
         # Image generation toggle (default: OFF)
         self.image_gen_checkbox = QCheckBox("Enable AI image generation")
         self.image_gen_checkbox.setChecked(False)
@@ -3144,60 +3124,12 @@ class ConversationPane(QWidget):
         self.starting_prompt_widget.returnPressed.connect(self.handle_propagate_click)
 
         # Setup controls - entry panel selectors
-        if hasattr(self, 'num_ais_selector'):
-            self.num_ais_selector.currentTextChanged.connect(self._populate_ai_assignments)
-            self.num_ais_selector.currentTextChanged.connect(self._on_num_ais_changed)
-            # Initialize AI assignments for default number (3)
-            self._populate_ai_assignments()
-
         if hasattr(self, 'scenario_selector'):
             self.scenario_selector.currentTextChanged.connect(self._on_scenario_changed)
+            # Trigger initial scenario load to populate app settings
+            if self.scenario_selector.currentText():
+                self._on_scenario_changed(self.scenario_selector.currentText())
 
-    def _populate_ai_assignments(self):
-        """Populate AI model assignment dropdowns using GroupedModelComboBox.
-
-        Uses the hierarchical Tier > Provider > Model selector instead of
-        a flat alphabetical list.
-        """
-        # Clear existing assignments - remove both widgets and sub-layouts
-        while self.ai_assignments_layout.count():
-            item = self.ai_assignments_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-                item.widget().deleteLater()
-            elif item.layout():
-                # Recursively clear sub-layouts
-                sub_layout = item.layout()
-                while sub_layout.count():
-                    sub_item = sub_layout.takeAt(0)
-                    if sub_item.widget():
-                        sub_item.widget().setParent(None)
-                        sub_item.widget().deleteLater()
-
-        self.ai_model_selectors = []
-
-        # Get number of AIs
-        num_ais = int(self.num_ais_selector.currentText())
-
-        # Create a GroupedModelComboBox for each AI slot
-        for i in range(1, num_ais + 1):
-            ai_row = QHBoxLayout()
-            ai_label = QLabel(f"AI-{i} model:")
-            ai_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
-            ai_row.addWidget(ai_label)
-
-            # Use GroupedModelComboBox for hierarchical model selection
-            ai_model_selector = GroupedModelComboBox(colors=COMIC_COLORS_FULL, parent=self)
-            ai_model_selector.setStyleSheet(get_comic_combobox_style())
-            ai_row.addWidget(ai_model_selector, 1)
-
-            self.ai_assignments_layout.addLayout(ai_row)
-            self.ai_model_selectors.append(ai_model_selector)
-
-            # Connect each selector - use currentIndexChanged for GroupedModelComboBox
-            ai_model_selector.currentIndexChanged.connect(
-                lambda idx, index=i-1, sel=ai_model_selector: self._on_ai_model_changed(index, sel.get_selected_model_id())
-            )
 
     def _on_image_gen_toggled(self, checked):
         """Update app when image generation toggle is changed"""
@@ -3206,10 +3138,33 @@ class ConversationPane(QWidget):
             main_window.auto_image = checked
 
     def _on_scenario_changed(self, scenario_name):
-        """Update app when scenario is changed"""
+        """Update app when scenario is changed.
+
+        Extracts num_ais and default models from scenario data and
+        updates the app state accordingly.
+        """
         main_window = self.window()
         if hasattr(main_window, 'current_scenario'):
             main_window.current_scenario = scenario_name
+
+            # Get scenario data
+            scenario_data = SYSTEM_PROMPT_PAIRS.get(scenario_name, {})
+
+            # Extract num_ais from scenario
+            num_ais = get_num_ais(scenario_data)
+            main_window.num_ais = num_ais
+
+            # Extract default models from scenario
+            ai_slots = get_ai_slots(scenario_data)
+            main_window.ai_models = []
+            for i in range(1, 6):  # Always maintain 5 slots
+                ai_name = f"AI-{i}"
+                if ai_name in ai_slots:
+                    model = get_model(scenario_data, ai_name) or DEFAULT_MODEL
+                    main_window.ai_models.append(model)
+                else:
+                    main_window.ai_models.append(DEFAULT_MODEL)
+
             # Update config status display
             if hasattr(main_window, 'left_pane'):
                 main_window.left_pane.update_config_status(
@@ -3219,61 +3174,21 @@ class ConversationPane(QWidget):
                     main_window.num_ais
                 )
 
-    def _on_num_ais_changed(self, num_text):
-        """Update app when number of AIs is changed"""
-        main_window = self.window()
-        if hasattr(main_window, 'num_ais'):
-            main_window.num_ais = int(num_text)
-            # Update config status display
-            if hasattr(main_window, 'left_pane'):
-                main_window.left_pane.update_config_status(
-                    main_window.conversation_mode,
-                    main_window.current_scenario,
-                    main_window.max_iterations,
-                    main_window.num_ais
-                )
 
-    def _on_ai_model_changed(self, ai_index, model_id):
-        """Update app when an AI model assignment is changed.
-
-        Args:
-            ai_index: Zero-based index of the AI slot (0 = AI-1, 1 = AI-2, etc.)
-            model_id: The model ID string from GroupedModelComboBox.get_selected_model_id()
-        """
-        main_window = self.window()
-        if hasattr(main_window, 'ai_models') and model_id:
-            # Ensure ai_models list is long enough
-            while len(main_window.ai_models) <= ai_index:
-                main_window.ai_models.append("anthropic/claude-opus-4.5")
-            main_window.ai_models[ai_index] = model_id
-            # Update config status display
-            if hasattr(main_window, 'left_pane'):
-                main_window.left_pane.update_config_status(
-                    main_window.conversation_mode,
-                    main_window.current_scenario,
-                    main_window.max_iterations,
-                    main_window.num_ais
-                )
 
     def sync_setup_controls(self):
-        """Sync setup controls with app settings."""
+        """Sync setup controls with app settings.
+
+        Note: After Step 4 refactor, only scenario selector remains.
+        Num_ais and models are read directly from scenario data.
+        """
         main_window = self.window()
 
-        # Scenario
+        # Scenario selector
         if hasattr(self, 'scenario_selector') and hasattr(main_window, 'current_scenario'):
             index = self.scenario_selector.findText(main_window.current_scenario)
             if index >= 0:
                 self.scenario_selector.setCurrentIndex(index)
-
-        # Number of AIs
-        if hasattr(self, 'num_ais_selector') and hasattr(main_window, 'num_ais'):
-            self.num_ais_selector.setCurrentText(str(main_window.num_ais))
-
-        # AI model assignments - use set_model_by_id() on GroupedModelComboBox
-        if hasattr(main_window, 'ai_models'):
-            for i, model_id in enumerate(main_window.ai_models[:len(self.ai_model_selectors)]):
-                if i < len(self.ai_model_selectors):
-                    self.ai_model_selectors[i].set_model_by_id(model_id)
     
     def clear_input(self):
         """Clear the input field"""
@@ -4618,9 +4533,23 @@ class LiminalBackroomsApp(QMainWindow):
         # Settings state (moved from ControlPanel to app instance variables)
         self.conversation_mode = "AI-AI"
         self.max_iterations = 4
-        self.num_ais = 3
-        self.ai_models = ["anthropic/claude-opus-4.5"] * 5  # List of 5 model IDs
         self.current_scenario = list(SYSTEM_PROMPT_PAIRS.keys())[0] if SYSTEM_PROMPT_PAIRS else ""
+
+        # Get num_ais and models from the default scenario
+        default_scenario_data = SYSTEM_PROMPT_PAIRS.get(self.current_scenario, {})
+        self.num_ais = get_num_ais(default_scenario_data)
+
+        # Extract default models from scenario (maintain 5 slots)
+        self.ai_models = []
+        ai_slots = get_ai_slots(default_scenario_data)
+        for i in range(1, 6):
+            ai_name = f"AI-{i}"
+            if ai_name in ai_slots:
+                model = get_model(default_scenario_data, ai_name) or DEFAULT_MODEL
+                self.ai_models.append(model)
+            else:
+                self.ai_models.append(DEFAULT_MODEL)
+
         self.invite_tier = "Free"
         self.auto_image = False
         self.allow_duplicate_models = False

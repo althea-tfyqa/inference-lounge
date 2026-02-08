@@ -57,7 +57,7 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Create tab widget
+        # Create tab widget with cream stage palette
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -73,15 +73,15 @@ class SettingsDialog(QDialog):
                 font-size: 11px;
                 font-weight: bold;
                 letter-spacing: 1px;
+                font-family: 'Comic Neue';
             }}
             QTabBar::tab:hover {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
+                color: {COLORS['accent_cyan']};
             }}
             QTabBar::tab:selected {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
-                border-bottom: 2px solid {COLORS['accent_cyan']};
+                border-bottom: none;
             }}
         """)
 
@@ -103,25 +103,61 @@ class SettingsDialog(QDialog):
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
-        cancel_btn.setStyleSheet(get_button_style(COLORS['text_dim']))
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_normal']};
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-family: 'Comic Neue';
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['border']};
+            }}
+        """)
         cancel_btn.setMinimumWidth(100)
 
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(self.accept)
-        save_btn.setStyleSheet(get_button_style(COLORS['accent_cyan']))
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent_cyan']};
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-family: 'Comic Neue';
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['text_glow']};
+            }}
+        """)
         save_btn.setMinimumWidth(100)
         save_btn.setDefault(True)
 
         button_layout.addWidget(cancel_btn)
         button_layout.addWidget(save_btn)
 
-        layout.addLayout(button_layout)
+        # Apply the button layout to a container with dark navy background
+        button_container = QWidget()
+        button_container.setLayout(button_layout)
+        button_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+            }}
+        """)
 
-        # Apply dark theme
+        layout.addWidget(button_container)
+
+        # Apply cream stage theme
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['text_normal']};
+                font-family: 'Comic Neue';
             }}
         """)
 
@@ -134,7 +170,7 @@ class SettingsDialog(QDialog):
 
         # Mode selector
         mode_label = QLabel("▸ CONVERSATION MODE")
-        mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
+        mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue';")
         layout.addWidget(mode_label)
 
         self.mode_selector = NoScrollComboBox()
@@ -144,7 +180,7 @@ class SettingsDialog(QDialog):
 
         # Iterations selector
         iterations_label = QLabel("▸ ITERATIONS")
-        iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-top: 10px;")
+        iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue'; margin-top: 10px;")
         layout.addWidget(iterations_label)
 
         self.iterations_selector = NoScrollComboBox()
@@ -154,7 +190,7 @@ class SettingsDialog(QDialog):
 
         # Number of AIs selector
         num_ais_label = QLabel("▸ NUMBER OF AIs")
-        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-top: 10px;")
+        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue'; margin-top: 10px;")
         layout.addWidget(num_ais_label)
 
         self.num_ais_selector = NoScrollComboBox()
@@ -166,7 +202,7 @@ class SettingsDialog(QDialog):
 
         # AI Invite Tier
         invite_tier_label = QLabel("▸ AI INVITE TIER")
-        invite_tier_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-top: 10px;")
+        invite_tier_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue'; margin-top: 10px;")
         layout.addWidget(invite_tier_label)
 
         invite_tier_info = QLabel("Controls which models AIs can add to the chat")
@@ -242,7 +278,6 @@ class SettingsDialog(QDialog):
                 border: none;
                 background-color: {COLORS['bg_dark']};
             }}
-            {get_scrollbar_style()}
         """)
 
         scroll_content = QWidget()
@@ -251,7 +286,13 @@ class SettingsDialog(QDialog):
         layout.setSpacing(15)
 
         models_label = QLabel("▸ AI MODELS")
-        models_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
+        models_label.setStyleSheet(f"""
+            color: {COLORS['text_glow']};
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            font-family: 'Comic Neue';
+        """)
         layout.addWidget(models_label)
 
         # Create all 5 AI model selectors
@@ -265,11 +306,42 @@ class SettingsDialog(QDialog):
             container_layout.setSpacing(5)
 
             ai_label = QLabel(f"AI-{i}")
-            ai_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+            ai_label.setStyleSheet(f"""
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                font-family: 'Comic Neue';
+            """)
             container_layout.addWidget(ai_label)
 
             model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
-            model_selector.setStyleSheet(get_combobox_style())
+            # Simple styling - don't fight the delegate
+            model_selector.setStyleSheet(f"""
+                QComboBox {{
+                    background-color: white;
+                    color: {COLORS['text_normal']};
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-family: 'Comic Neue';
+                }}
+            """)
+            # Style the popup view directly
+            if model_selector.view():
+                model_selector.view().setStyleSheet(f"""
+                    QTreeView {{
+                        background-color: white;
+                        color: {COLORS['text_normal']};
+                        border: 2px solid {COLORS['border']};
+                        selection-background-color: {COLORS['accent_cyan']};
+                        selection-color: white;
+                    }}
+                    QTreeView::item {{
+                        padding: 6px;
+                    }}
+                    QTreeView::item:hover {{
+                        background-color: {COLORS['border']};
+                    }}
+                """)
             container_layout.addWidget(model_selector)
 
             self.ai_model_containers.append(container)
@@ -296,7 +368,7 @@ class SettingsDialog(QDialog):
         layout.setSpacing(15)
 
         scenario_label = QLabel("▸ CONVERSATION SCENARIO")
-        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
+        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue';")
         layout.addWidget(scenario_label)
 
         self.scenario_selector = NoScrollComboBox()
@@ -416,9 +488,9 @@ class SettingsDialog(QDialog):
         right_layout.addWidget(self.prompt_name_input)
 
         # Prompt text editor
-        text_label = QLabel("Prompt Text:")
-        text_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; margin-top: 10px;")
-        right_layout.addWidget(text_label)
+        text_dim = QLabel("Prompt Text:")
+        text_dim.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; margin-top: 10px;")
+        right_layout.addWidget(text_dim)
 
         self.prompt_text_input = QPlainTextEdit()
         self.prompt_text_input.setStyleSheet(f"""
@@ -468,7 +540,7 @@ class SettingsDialog(QDialog):
         layout.setSpacing(15)
 
         options_label = QLabel("▸ OPTIONS")
-        options_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
+        options_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue';")
         layout.addWidget(options_label)
 
         # Auto-image checkbox
@@ -488,7 +560,7 @@ class SettingsDialog(QDialog):
         layout.setSpacing(15)
 
         export_label = QLabel("▸ EXPORT & EVALUATION")
-        export_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
+        export_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 11px; font-weight: bold; letter-spacing: 1px; font-family: 'Comic Neue';")
         layout.addWidget(export_label)
 
         info_label = QLabel("Note: Export buttons have been moved to the File menu for easier access during conversations.")
