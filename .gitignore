@@ -195,3 +195,6 @@ outputs/conversation_full.html
 # Temporary diff files
 diff_*.txt
 DIFF_*.md
+
+# Automatic backup files (timestamped by ScenarioManager)
+*.backup-*
