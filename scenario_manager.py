@@ -245,19 +245,12 @@ class ScenarioManager:
             for slot in cls.REQUIRED_SLOTS:
                 prompt_text = prompts.get(slot, "")
 
-                # For triple-quoted strings, we need to handle:
+                # For triple-quoted strings, we only need to escape:
                 # 1. Backslashes (\ -> \\)
-                # 2. Triple quotes (""" -> \"\"\")
-                # 3. String ending with " (would create """" at the end)
+                # 2. Triple quotes in content (""" -> \"\"\")
+                # Note: Single or double quotes at the end are fine in triple-quoted strings
 
                 escaped_prompt = prompt_text.replace('\\', '\\\\').replace('"""', '\\"""')
-
-                # If string ends with one or two quotes, escape the last one
-                # to prevent creating """ " or """" at the end
-                if escaped_prompt.endswith('"'):
-                    escaped_prompt = escaped_prompt[:-1] + '\\"'
-                elif escaped_prompt.endswith('""'):
-                    escaped_prompt = escaped_prompt[:-2] + '"\\"'
 
                 lines.append(f'        "{slot}": """{escaped_prompt}""",')
 
