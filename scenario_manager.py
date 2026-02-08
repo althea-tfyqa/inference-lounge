@@ -3,13 +3,79 @@ Scenario Manager - Business logic for managing conversation scenarios in config.
 
 Handles CRUDR operations (Create, Read, Update, Delete, Rename) for SYSTEM_PROMPT_PAIRS
 in config.py with safe file operations and automatic backups.
+
+New format (unified scenarios):
+    SYSTEM_PROMPT_PAIRS = {
+        "Scenario Name": {
+            "default_prompt": "optional starting prompt text",
+            "AI-1": {"prompt": "system prompt", "model": "model/id", "name": "Display Name"},
+            "AI-2": {"prompt": "system prompt"},
+            ...
+        },
+    }
+
+AI slots are identified by the pattern AI-\d+. Everything else is scenario metadata.
 """
 
 import os
+import re
 import ast
 import shutil
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
+
+# Pattern to identify AI slot keys (e.g. "AI-1", "AI-2", etc.)
+AI_SLOT_PATTERN = re.compile(r'^AI-\d+$')
+
+# Default model when none is specified in the scenario
+DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+
+
+# =========================================================================
+# Scenario data helpers — work on a single scenario's dict
+# =========================================================================
+
+def get_ai_slots(scenario_data: dict) -> List[str]:
+    """Return sorted list of AI-N keys in a scenario (e.g. ['AI-1', 'AI-2'])."""
+    return sorted(
+        [k for k in scenario_data if AI_SLOT_PATTERN.match(k)],
+        key=lambda s: int(s.split('-')[1])
+    )
+
+
+def get_num_ais(scenario_data: dict) -> int:
+    """Return number of AI slots in a scenario."""
+    return len(get_ai_slots(scenario_data))
+
+
+def get_prompt(scenario_data: dict, ai_slot: str) -> str:
+    """Return the system prompt for an AI slot. Handles both old and new format."""
+    val = scenario_data.get(ai_slot, {})
+    if isinstance(val, dict):
+        return val.get("prompt", "")
+    # Legacy fallback: value is a plain string
+    return str(val)
+
+
+def get_model(scenario_data: dict, ai_slot: str) -> Optional[str]:
+    """Return the model ID for an AI slot, or None if not specified."""
+    val = scenario_data.get(ai_slot, {})
+    if isinstance(val, dict):
+        return val.get("model")
+    return None
+
+
+def get_name(scenario_data: dict, ai_slot: str) -> str:
+    """Return the custom display name for an AI slot, or the slot key as fallback."""
+    val = scenario_data.get(ai_slot, {})
+    if isinstance(val, dict):
+        return val.get("name", ai_slot)
+    return ai_slot
+
+
+def get_default_prompt(scenario_data: dict) -> str:
+    """Return the default starting prompt for a scenario, or empty string."""
+    return scenario_data.get("default_prompt", "")
 
 
 class ScenarioValidationError(Exception):
@@ -22,16 +88,13 @@ class ScenarioManager:
 
     CONFIG_PATH = "config.py"
 
-    # Required AI slots for each scenario
-    REQUIRED_SLOTS = ["AI-1", "AI-2", "AI-3", "AI-4", "AI-5"]
-
     @classmethod
-    def load_scenarios(cls) -> Dict[str, Dict[str, str]]:
+    def load_scenarios(cls) -> Dict[str, Dict[str, Any]]:
         """
         Load SYSTEM_PROMPT_PAIRS from config.py using AST parsing.
 
         Returns:
-            Dict mapping scenario names to their AI prompt dictionaries
+            Dict mapping scenario names to their config dictionaries
 
         Raises:
             FileNotFoundError: If config.py doesn't exist
@@ -55,7 +118,6 @@ class ScenarioManager:
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "SYSTEM_PROMPT_PAIRS":
                         # Extract the dictionary literal from the AST node
-                        # Get the text of just the value part
                         start_line = node.value.lineno
                         end_line = node.value.end_lineno
                         start_col = node.value.col_offset
@@ -91,13 +153,13 @@ class ScenarioManager:
         raise ValueError("SYSTEM_PROMPT_PAIRS not found in config.py")
 
     @classmethod
-    def validate_scenario(cls, name: str, prompts: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+    def validate_scenario(cls, name: str, data: dict) -> Tuple[bool, Optional[str]]:
         """
         Validate a scenario before saving.
 
         Args:
             name: Scenario name
-            prompts: Dictionary mapping AI slot names to prompt text
+            data: Scenario config dict (may contain AI slots + metadata keys)
 
         Returns:
             Tuple of (is_valid, error_message)
@@ -110,28 +172,41 @@ class ScenarioManager:
         if '"' in name and "'" in name:
             return False, "Scenario name cannot contain both single and double quotes"
 
-        # Check all required slots are present
-        if not isinstance(prompts, dict):
-            return False, "Prompts must be a dictionary"
+        if not isinstance(data, dict):
+            return False, "Scenario data must be a dictionary"
 
-        missing_slots = [slot for slot in cls.REQUIRED_SLOTS if slot not in prompts]
-        if missing_slots:
-            return False, f"Missing required AI slots: {', '.join(missing_slots)}"
+        # Must have at least 2 AI slots
+        slots = get_ai_slots(data)
+        if len(slots) < 2:
+            return False, f"Scenario must have at least 2 AI slots, found {len(slots)}"
+        if len(slots) > 5:
+            return False, f"Scenario can have at most 5 AI slots, found {len(slots)}"
 
-        # Check all values are strings
-        for slot, prompt in prompts.items():
-            if not isinstance(prompt, str):
-                return False, f"Prompt for {slot} must be a string, got {type(prompt).__name__}"
+        # Validate each AI slot
+        for slot in slots:
+            val = data[slot]
+            if isinstance(val, dict):
+                if "prompt" not in val:
+                    return False, f"{slot} must have a 'prompt' key"
+                if not isinstance(val["prompt"], str):
+                    return False, f"{slot} prompt must be a string"
+                # model and name are optional strings
+                if "model" in val and not isinstance(val["model"], str):
+                    return False, f"{slot} model must be a string"
+                if "name" in val and not isinstance(val["name"], str):
+                    return False, f"{slot} name must be a string"
+            elif isinstance(val, str):
+                # Legacy format — plain string prompt, still valid
+                pass
+            else:
+                return False, f"{slot} must be a dict or string, got {type(val).__name__}"
 
         return True, None
 
     @classmethod
-    def validate_all_scenarios(cls, scenarios: Dict[str, Dict[str, str]]) -> Tuple[bool, Optional[str]]:
+    def validate_all_scenarios(cls, scenarios: dict) -> Tuple[bool, Optional[str]]:
         """
         Validate all scenarios in a collection.
-
-        Args:
-            scenarios: Dictionary of all scenarios
 
         Returns:
             Tuple of (is_valid, error_message)
@@ -145,8 +220,8 @@ class ScenarioManager:
             return False, "Duplicate scenario names found"
 
         # Validate each scenario
-        for name, prompts in scenarios.items():
-            is_valid, error = cls.validate_scenario(name, prompts)
+        for name, data in scenarios.items():
+            is_valid, error = cls.validate_scenario(name, data)
             if not is_valid:
                 return False, f"Scenario '{name}': {error}"
 
@@ -159,9 +234,6 @@ class ScenarioManager:
 
         Returns:
             Path to the backup file
-
-        Raises:
-            FileNotFoundError: If config.py doesn't exist
         """
         if not os.path.exists(cls.CONFIG_PATH):
             raise FileNotFoundError(f"{cls.CONFIG_PATH} not found")
@@ -173,26 +245,19 @@ class ScenarioManager:
         return backup_path
 
     @classmethod
-    def generate_config_content(cls, scenarios: Dict[str, Dict[str, str]]) -> str:
+    def generate_config_content(cls, scenarios: dict) -> str:
         """
         Generate new config.py content with updated scenarios.
 
-        This uses a template approach: reads the original config.py,
+        Uses a template approach: reads the original config.py,
         replaces only the SYSTEM_PROMPT_PAIRS section, and preserves
         everything else.
-
-        Args:
-            scenarios: Dictionary of scenarios to write
-
-        Returns:
-            Complete config.py content as a string
         """
         # Read original config
         with open(cls.CONFIG_PATH, 'r', encoding='utf-8') as f:
             original_content = f.read()
 
         # Use AST to find where SYSTEM_PROMPT_PAIRS ends
-        # This is more reliable than manual parsing
         try:
             tree = ast.parse(original_content)
         except SyntaxError as e:
@@ -206,84 +271,92 @@ class ScenarioManager:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "SYSTEM_PROMPT_PAIRS":
-                        # Found it! Get line and column info
                         start_line = target.lineno
                         end_line = node.end_lineno
 
-                        # Convert line numbers to character positions
                         lines = original_content.split('\n')
-
-                        # Start is at the beginning of the assignment line
                         start_idx = sum(len(line) + 1 for line in lines[:start_line-1])
-
-                        # End is at the end of the last line of the assignment
                         end_idx = sum(len(line) + 1 for line in lines[:end_line])
-
                         break
 
         if start_idx is None or end_idx is None:
             raise ValueError("Could not locate SYSTEM_PROMPT_PAIRS in config.py")
 
         # Generate new SYSTEM_PROMPT_PAIRS content
-        lines = ["SYSTEM_PROMPT_PAIRS = {"]
-        lines.append("    # this is a basic system prompt for a conversation between two AIs. Experiment with different prompts to see how they affect the conversation. Add new prompts to the library to use them in the GUI.")
-        lines.append("    ")
+        output_lines = ["SYSTEM_PROMPT_PAIRS = {"]
 
-        # Sort scenarios by name for consistent ordering
         sorted_scenarios = sorted(scenarios.items())
 
-        for idx, (scenario_name, prompts) in enumerate(sorted_scenarios):
+        for s_idx, (scenario_name, data) in enumerate(sorted_scenarios):
             # Determine quote style for scenario name
             if '"' in scenario_name:
                 name_quote = "'"
             else:
                 name_quote = '"'
 
-            lines.append(f'    {name_quote}{scenario_name}{name_quote}: {{')
+            output_lines.append(f'    {name_quote}{scenario_name}{name_quote}: {{')
 
-            # Write each AI slot
-            for slot in cls.REQUIRED_SLOTS:
-                prompt_text = prompts.get(slot, "")
+            # Write metadata keys first (like default_prompt)
+            if "default_prompt" in data and data["default_prompt"]:
+                dp = data["default_prompt"].replace('\\', '\\\\').replace('"""', '\\"""')
+                output_lines.append(f'        "default_prompt": """{dp}""",')
+                output_lines.append("        ")
 
-                # For triple-quoted strings, we only need to escape:
-                # 1. Backslashes (\ -> \\)
-                # 2. Triple quotes in content (""" -> \"\"\")
-                # Note: Single or double quotes at the end are fine in triple-quoted strings
+            # Write AI slots
+            slots = get_ai_slots(data)
+            for slot_idx, slot in enumerate(slots):
+                val = data[slot]
 
-                escaped_prompt = prompt_text.replace('\\', '\\\\').replace('"""', '\\"""')
+                if isinstance(val, dict):
+                    # New format: dict with prompt, optional model & name
+                    prompt_text = val.get("prompt", "")
+                    escaped_prompt = prompt_text.replace('\\', '\\\\').replace('"""', '\\"""')
 
-                lines.append(f'        "{slot}": """{escaped_prompt}""",')
+                    output_lines.append(f'        "{slot}": {{')
+                    output_lines.append(f'            "prompt": """{escaped_prompt}""",')
 
-                # Add blank line after each AI except the last
-                if slot != cls.REQUIRED_SLOTS[-1]:
-                    lines.append("        ")
+                    if val.get("model"):
+                        output_lines.append(f'            "model": "{val["model"]}",')
+
+                    if val.get("name"):
+                        # Escape the name for safe Python string
+                        name_escaped = val["name"].replace('\\', '\\\\').replace('"', '\\"')
+                        output_lines.append(f'            "name": "{name_escaped}",')
+
+                    output_lines.append('        },')
+                else:
+                    # Legacy format: plain string — convert to new format on save
+                    prompt_text = str(val)
+                    escaped_prompt = prompt_text.replace('\\', '\\\\').replace('"""', '\\"""')
+                    output_lines.append(f'        "{slot}": {{')
+                    output_lines.append(f'            "prompt": """{escaped_prompt}""",')
+                    output_lines.append('        },')
+
+                # Blank line between AI slots (not after last)
+                if slot_idx < len(slots) - 1:
+                    output_lines.append("        ")
 
             # Close scenario dict
-            if idx < len(sorted_scenarios) - 1:
-                lines.append("    },")
-                lines.append("    ")
+            if s_idx < len(sorted_scenarios) - 1:
+                output_lines.append("    },")
+                output_lines.append("    ")
             else:
-                lines.append("    }")
+                output_lines.append("    }")
 
-        lines.append("}")
+        output_lines.append("}")
 
-        new_dict_content = "\n".join(lines)
+        new_dict_content = "\n".join(output_lines)
 
         # Construct final content: before + new dict + after
         before = original_content[:start_idx]
         after = original_content[end_idx:]
 
-        # Ensure proper spacing: add newline after the generated dict
         return before + new_dict_content + "\n" + after
 
     @classmethod
-    def save_scenarios(cls, scenarios: Dict[str, Dict[str, str]], create_backup: bool = True) -> Tuple[bool, Optional[str]]:
+    def save_scenarios(cls, scenarios: dict, create_backup: bool = True) -> Tuple[bool, Optional[str]]:
         """
         Save scenarios to config.py with validation and atomic write.
-
-        Args:
-            scenarios: Dictionary of scenarios to save
-            create_backup: Whether to create a backup before saving
 
         Returns:
             Tuple of (success, error_message)
@@ -331,12 +404,7 @@ class ScenarioManager:
 
     @classmethod
     def get_scenario_names(cls) -> List[str]:
-        """
-        Get list of all scenario names.
-
-        Returns:
-            List of scenario names, sorted alphabetically
-        """
+        """Get sorted list of all scenario names."""
         try:
             scenarios = cls.load_scenarios()
             return sorted(scenarios.keys())
