@@ -27,7 +27,15 @@ from typing import Dict, List, Tuple, Optional, Any
 # Pattern to identify AI slot keys (e.g. "AI-1", "AI-2", etc.)
 AI_SLOT_PATTERN = re.compile(r'^AI-\d+$')
 
-# Default model when none is specified in the scenario
+# Default models when none are specified in the scenario
+# Maps AI slot number to default model
+DEFAULT_MODELS = {
+    "AI-1": "anthropic/claude-sonnet-4.5",      # Claude Sonnet 4.5
+    "AI-2": "google/gemini-3-pro-preview",       # Gemini 3 Pro Advanced
+    "AI-3": "x-ai/grok-4.1-fast",                # Grok 4.1 Fast
+}
+
+# Fallback if AI slot exceeds the core 3
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 
 
@@ -57,12 +65,24 @@ def get_prompt(scenario_data: dict, ai_slot: str) -> str:
     return str(val)
 
 
-def get_model(scenario_data: dict, ai_slot: str) -> Optional[str]:
-    """Return the model ID for an AI slot, or None if not specified."""
+def get_model(scenario_data: dict, ai_slot: str) -> str:
+    """
+    Return the model ID for an AI slot.
+
+    If not specified in scenario, returns the appropriate core default:
+    - AI-1: Claude Sonnet 4.5
+    - AI-2: Gemini 3 Pro Advanced
+    - AI-3: Grok 4.1 Fast
+    - AI-4+: Claude Sonnet 4.5 (fallback)
+    """
     val = scenario_data.get(ai_slot, {})
     if isinstance(val, dict):
-        return val.get("model")
-    return None
+        model = val.get("model")
+        if model:
+            return model
+
+    # Return core default model for this AI slot
+    return DEFAULT_MODELS.get(ai_slot, DEFAULT_MODEL)
 
 
 def get_name(scenario_data: dict, ai_slot: str) -> str:

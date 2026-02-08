@@ -61,7 +61,7 @@ except ImportError:
 from grouped_model_selector import GroupedModelComboBox
 
 # Import scenario manager helpers
-from scenario_manager import get_ai_slots, get_num_ais, get_prompt, get_model, get_name, DEFAULT_MODEL
+from scenario_manager import get_ai_slots, get_num_ais, get_prompt, get_model, get_name, DEFAULT_MODEL, DEFAULT_MODELS
 
 
 # =============================================================================
@@ -3160,10 +3160,11 @@ class ConversationPane(QWidget):
             for i in range(1, 6):  # Always maintain 5 slots
                 ai_name = f"AI-{i}"
                 if ai_name in ai_slots:
-                    model = get_model(scenario_data, ai_name) or DEFAULT_MODEL
+                    model = get_model(scenario_data, ai_name)
                     main_window.ai_models.append(model)
                 else:
-                    main_window.ai_models.append(DEFAULT_MODEL)
+                    # Use appropriate core default for AI-1/2/3, fallback for AI-4/5
+                    main_window.ai_models.append(DEFAULT_MODELS.get(ai_name, DEFAULT_MODEL))
 
             # Update config status display
             if hasattr(main_window, 'left_pane'):
@@ -4545,10 +4546,11 @@ class LiminalBackroomsApp(QMainWindow):
         for i in range(1, 6):
             ai_name = f"AI-{i}"
             if ai_name in ai_slots:
-                model = get_model(default_scenario_data, ai_name) or DEFAULT_MODEL
+                model = get_model(default_scenario_data, ai_name)
                 self.ai_models.append(model)
             else:
-                self.ai_models.append(DEFAULT_MODEL)
+                # Use appropriate core default for AI-1/2/3, fallback for AI-4/5
+                self.ai_models.append(DEFAULT_MODELS.get(ai_name, DEFAULT_MODEL))
 
         self.invite_tier = "Free"
         self.auto_image = False

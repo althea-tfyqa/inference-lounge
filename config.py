@@ -637,10 +637,17 @@ gc energy:
     "Custom": {
         "AI-1": {
             "prompt": """""",
+            "model": "anthropic/claude-sonnet-4.5",
         },
-        
+
         "AI-2": {
             "prompt": """""",
+            "model": "google/gemini-3-pro-preview",
+        },
+
+        "AI-3": {
+            "prompt": """""",
+            "model": "x-ai/grok-4.1-fast",
         },
     },
     

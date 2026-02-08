@@ -14,7 +14,8 @@ from PyQt6.QtGui import QFont
 
 from scenario_manager import (
     ScenarioManager, ScenarioValidationError,
-    get_ai_slots, get_num_ais, get_prompt, get_model, get_name, DEFAULT_MODEL
+    get_ai_slots, get_num_ais, get_prompt, get_model, get_name,
+    DEFAULT_MODEL, DEFAULT_MODELS
 )
 from styles import COLORS  # Keep for minimal compatibility
 from grouped_model_selector import GroupedModelComboBox
@@ -709,10 +710,12 @@ class ScenarioEditorDialog(QDialog):
             )
             return
 
-        # Create new scenario with 2 empty AI slots (minimum) in new nested format
+        # Create new scenario with 3 AI slots using core default models
+        # Claude Sonnet 4.5, Gemini 3 Pro Advanced, Grok 4.1 Fast
         self.scenarios[name] = {
-            "AI-1": {"prompt": ""},
-            "AI-2": {"prompt": ""}
+            "AI-1": {"prompt": "", "model": DEFAULT_MODELS["AI-1"]},
+            "AI-2": {"prompt": "", "model": DEFAULT_MODELS["AI-2"]},
+            "AI-3": {"prompt": "", "model": DEFAULT_MODELS["AI-3"]}
         }
 
         # Refresh list and select new scenario
