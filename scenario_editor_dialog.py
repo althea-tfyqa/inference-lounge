@@ -564,10 +564,14 @@ class ScenarioEditorDialog(QDialog):
             )
 
     def _populate_scenario_list(self):
-        """Populate the scenario list widget."""
+        """Populate the scenario list widget with AI counts."""
         self.scenario_list.clear()
         for name in sorted(self.scenarios.keys()):
-            self.scenario_list.addItem(name)
+            # Get number of AIs in this scenario
+            num_ais = get_num_ais(self.scenarios[name])
+            # Display as "Scenario Name (N)"
+            display_name = f"{name} ({num_ais})"
+            self.scenario_list.addItem(display_name)
 
         # Select first item if available
         if self.scenario_list.count() > 0:
@@ -579,7 +583,10 @@ class ScenarioEditorDialog(QDialog):
             self._clear_editor()
             return
 
-        scenario_name = current.text()
+        # Extract scenario name from display text "Name (N)"
+        display_text = current.text()
+        # Remove the " (N)" suffix to get actual scenario name
+        scenario_name = display_text.rsplit(' (', 1)[0] if ' (' in display_text else display_text
         self._load_scenario_into_editor(scenario_name)
 
     def _load_scenario_into_editor(self, scenario_name: str):
@@ -721,8 +728,10 @@ class ScenarioEditorDialog(QDialog):
         # Refresh list and select new scenario
         self._populate_scenario_list()
 
-        # Find and select the new item
-        items = self.scenario_list.findItems(name, Qt.MatchFlag.MatchExactly)
+        # Find and select the new item (search for name with count)
+        num_ais = get_num_ais(self.scenarios[name])
+        display_name = f"{name} ({num_ais})"
+        items = self.scenario_list.findItems(display_name, Qt.MatchFlag.MatchExactly)
         if items:
             self.scenario_list.setCurrentItem(items[0])
 
@@ -779,8 +788,10 @@ class ScenarioEditorDialog(QDialog):
         # Refresh list
         self._populate_scenario_list()
 
-        # Re-select renamed item
-        items = self.scenario_list.findItems(new_name, Qt.MatchFlag.MatchExactly)
+        # Re-select renamed item (search for name with count)
+        num_ais = get_num_ais(self.scenarios[new_name])
+        display_name = f"{new_name} ({num_ais})"
+        items = self.scenario_list.findItems(display_name, Qt.MatchFlag.MatchExactly)
         if items:
             self.scenario_list.setCurrentItem(items[0])
 

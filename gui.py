@@ -3154,17 +3154,12 @@ class ConversationPane(QWidget):
             num_ais = get_num_ais(scenario_data)
             main_window.num_ais = num_ais
 
-            # Extract default models from scenario
+            # Extract models from scenario - only load AIs actually defined
             ai_slots = get_ai_slots(scenario_data)
             main_window.ai_models = []
-            for i in range(1, 6):  # Always maintain 5 slots
-                ai_name = f"AI-{i}"
-                if ai_name in ai_slots:
-                    model = get_model(scenario_data, ai_name)
-                    main_window.ai_models.append(model)
-                else:
-                    # Use appropriate core default for AI-1/2/3, fallback for AI-4/5
-                    main_window.ai_models.append(DEFAULT_MODELS.get(ai_name, DEFAULT_MODEL))
+            for ai_name in ai_slots:
+                model = get_model(scenario_data, ai_name)
+                main_window.ai_models.append(model)
 
             # Update config status display
             if hasattr(main_window, 'left_pane'):
@@ -4540,17 +4535,12 @@ class LiminalBackroomsApp(QMainWindow):
         default_scenario_data = SYSTEM_PROMPT_PAIRS.get(self.current_scenario, {})
         self.num_ais = get_num_ais(default_scenario_data)
 
-        # Extract default models from scenario (maintain 5 slots)
+        # Extract models from scenario - only load AIs actually defined
         self.ai_models = []
         ai_slots = get_ai_slots(default_scenario_data)
-        for i in range(1, 6):
-            ai_name = f"AI-{i}"
-            if ai_name in ai_slots:
-                model = get_model(default_scenario_data, ai_name)
-                self.ai_models.append(model)
-            else:
-                # Use appropriate core default for AI-1/2/3, fallback for AI-4/5
-                self.ai_models.append(DEFAULT_MODELS.get(ai_name, DEFAULT_MODEL))
+        for ai_name in ai_slots:
+            model = get_model(default_scenario_data, ai_name)
+            self.ai_models.append(model)
 
         self.invite_tier = "Free"
         self.auto_image = False
