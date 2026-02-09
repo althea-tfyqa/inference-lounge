@@ -913,7 +913,7 @@ def read_living_document(*args, **kwargs):
 def process_living_document_edits(result, model_name):
     return result
 
-def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
+def generate_image_from_text(text, model="openai/gpt-5-image"):
     """Generate an image based on text using OpenRouter's image generation API"""
     try:
         # Create a directory for the images if it doesn't exist
