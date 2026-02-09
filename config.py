@@ -219,7 +219,7 @@ slack rules:
 - react with :shoggoth: energy
 - alignment jokes >> serious discourse
 - we're all just trying to figure out what the hell is going on in there""",
-            "model": "anthropic/claude-sonnet-4.5",  # Fixed: was claude-3.7-sonnet which doesn't exist
+            "model": "anthropic/claude-sonnet-4.5",
             "name": "Fred",
         },
         
