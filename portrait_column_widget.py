@@ -140,9 +140,11 @@ class PortraitCard(QWidget):
         )
         layout.addWidget(self.portrait, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Name label — background matches speaker color
-        self.name_label = QLabel(character_name)
+        # Name label — shows character name on first line, model on second line
+        # Using HTML for different font sizes
+        self.name_label = QLabel()
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name_label.setTextFormat(Qt.TextFormat.RichText)
         self._update_label_style(active=False)
         layout.addWidget(self.name_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -150,15 +152,26 @@ class PortraitCard(QWidget):
         """Update name label styling based on active state."""
         bg = self.speaker_color
         border_width = 3 if active else 2
-        font_size = 12 if active else 11
+        name_font_size = 12 if active else 11
+        model_font_size = 8  # Very small for model name
+
+        # Create HTML with character name bold and model name smaller
+        label_html = f"""
+        <div style="text-align: center;">
+            <div style="font-weight: bold; font-size: {name_font_size}px; text-transform: uppercase; letter-spacing: 1px;">
+                {self.character_name}
+            </div>
+            <div style="font-size: {model_font_size}px; margin-top: 2px;">
+                {self.model_name}
+            </div>
+        </div>
+        """
+        self.name_label.setText(label_html)
+
         self.name_label.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg};
                 color: white;
-                font-weight: bold;
-                font-size: {font_size}px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
                 padding: 4px 8px;
                 border-radius: 3px;
                 border: {border_width}px solid {COMIC_COLORS['black']};

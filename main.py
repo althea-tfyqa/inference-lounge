@@ -375,7 +375,14 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 
         if not is_duplicate:
             filtered_conversation.append(msg)
-    
+
+    # Check if this is the AI's first message (no previous assistant messages from this AI)
+    has_previous_response = any(
+        msg.get("ai_name") == ai_name and msg.get("role") == "assistant"
+        for msg in filtered_conversation
+    )
+    is_first_message = not has_previous_response
+
     # Process filtered conversation
     for i, msg in enumerate(filtered_conversation):
         # Check if this message is from the current AI
@@ -474,7 +481,29 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                     "role": "user",
                     "content": "Let's continue our conversation."
                 })
-            
+
+    # If this is the AI's first message, prepend introduction instruction to the last user message
+    if is_first_message and len(messages) > 1:
+        last_msg = messages[-1]
+        if last_msg.get("role") == "user":
+            intro_instruction = (
+                "IMPORTANT: This is your first message in this conversation. "
+                "Begin by introducing yourself to the other participants: state your name, "
+                "share a sentence or two about who you are and what you bring to this conversation, "
+                "and explain your understanding of this conversation's purpose/mission based on your system prompt. "
+                "Then respond to: "
+            )
+            current_content = last_msg.get("content", "")
+            if isinstance(current_content, str):
+                last_msg["content"] = intro_instruction + current_content
+            elif isinstance(current_content, list):
+                # For structured content, prepend to first text part
+                for part in current_content:
+                    if part.get('type') == 'text':
+                        part['text'] = intro_instruction + part.get('text', '')
+                        break
+            print(f"[FIRST MESSAGE] Added introduction instruction for {ai_name}")
+
     # Print the processed messages for debugging
     print(f"Sending to {model} ({ai_name}):")
     for i, msg in enumerate(messages):
@@ -1609,6 +1638,7 @@ class ConversationManager:
                 "content": "",  # Start empty, will be filled by streaming
                 "ai_name": ai_name,
                 "model": model_name,
+                "custom_name": self.get_custom_name_for_ai(ai_name),
                 "_streaming": True  # Mark as streaming so we know to update it
             }
             self._streaming_messages[ai_name] = placeholder_msg
@@ -1662,6 +1692,7 @@ class ConversationManager:
             "content": "",  # Empty content - the render function will show the thinking bubble
             "ai_name": ai_name,
             "model": model,
+            "custom_name": self.get_custom_name_for_ai(ai_name),
             "_type": "typing_indicator",
             "_ai_number": ai_number
         }
@@ -1903,7 +1934,8 @@ class ConversationManager:
                 "role": "assistant",
                 "content": response_content,
                 "ai_name": ai_name,
-                "model": self.get_model_for_ai(ai_number)
+                "model": self.get_model_for_ai(ai_number),
+                "custom_name": self.get_custom_name_for_ai(ai_name)
             }
             
             # Add to conversation
@@ -2029,14 +2061,20 @@ class ConversationManager:
             # Find the most recent message from this AI
             for msg in reversed(conversation):
                 if msg.get("ai_name") == ai_name and msg.get("role") == "assistant":
-                    # Add the image path and model to the message
+                    # Add the image path, model, and type to the message
                     msg["generated_image_path"] = image_path
                     msg["image_model"] = result.get("model", "unknown")
+                    msg["_image_model"] = result.get("model", "unknown")  # For MessageWidget
+                    msg["_type"] = "generated_image"  # Mark as generated image so GUI renders it
+                    msg["_prompt"] = enhanced_prompt[:100]  # Store prompt for display
                     print(f"Added generated image {image_path} to message from {ai_name}")
                     break
-            
+
             # Update the conversation HTML to include the new image
             self.update_conversation_html(conversation)
+
+            # Trigger a re-render so the image displays in the GUI
+            self.app.left_pane.render_conversation()
             
             # Run on the main thread
             self.app.left_pane.display_image(image_path)
@@ -2558,6 +2596,23 @@ class ConversationManager:
         # Fallback to first model
         return self.app.ai_models[0] if self.app.ai_models else "anthropic/claude-opus-4.5"    # Fallback to text if no ID
 
+    def get_custom_name_for_ai(self, ai_name):
+        """Get the custom display name for an AI from the current scenario, if any."""
+        from config import SYSTEM_PROMPT_PAIRS
+        from scenario_manager import get_name
+
+        scenario_name = getattr(self.app, 'current_scenario', None)
+        if not scenario_name or scenario_name not in SYSTEM_PROMPT_PAIRS:
+            return None
+
+        scenario_data = SYSTEM_PROMPT_PAIRS[scenario_name]
+        custom_name = get_name(scenario_data, ai_name)
+
+        # get_name returns the ai_name if no custom name is set, so check if it's different
+        if custom_name and custom_name != ai_name:
+            return custom_name
+        return None
+
     def get_prompt_additions_for_ai(self, ai_name: str) -> str:
         """Get all prompt additions for a specific AI as a formatted string."""
         if ai_name not in self.ai_prompt_additions or not self.ai_prompt_additions[ai_name]:
@@ -2910,25 +2965,25 @@ class ConversationManager:
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #0A0E1A;
-            --bg-panel: #111827;
-            --bg-message: #151C2C;
-            --border: #1E293B;
-            --border-glow: #06B6D4;
-            --text-primary: #CBD5E1;
-            --text-dim: #64748B;
-            --text-bright: #F1F5F9;
-            --accent-cyan: #06B6D4;
-            --accent-purple: #A855F7;
+            --bg-dark: #FFFFFF;
+            --bg-panel: #F3F4F6;
+            --bg-message: #F9FAFB;
+            --border: #D1D5DB;
+            --border-glow: #93C5FD;
+            --text-primary: #374151;
+            --text-dim: #9CA3AF;
+            --text-bright: #111827;
+            --accent-cyan: #3B82F6;
+            --accent-purple: #8B5CF6;
             --accent-pink: #EC4899;
             --accent-green: #10B981;
-            --accent-yellow: #FBBF24;
-            --ai-1: #6FFFE6;
-            --ai-2: #06E2D4;
-            --ai-3: #54F5E9;
-            --ai-4: #8BFCEF;
-            --ai-5: #91FCFD;
-            --human: #ff00b3;
+            --accent-yellow: #F59E0B;
+            --ai-1: #2563EB;
+            --ai-2: #0D9488;
+            --ai-3: #7C3AED;
+            --ai-4: #DB2777;
+            --ai-5: #EA580C;
+            --human: #4F46E5;
         }
         
         * { 
@@ -3533,20 +3588,15 @@ def create_gui():
     else:
         print(f"Note: No app icon found at {icon_path}")
     
-    # Load custom fonts (Comic Neue for body, Bangers for titles)
+    # Load custom fonts (kept for future re-theming)
     loaded_fonts = load_fonts()
     if loaded_fonts:
-        print(f"Successfully loaded custom fonts: {', '.join(loaded_fonts)}")
+        print(f"Available custom fonts: {', '.join(loaded_fonts)}")
     else:
         print("No custom fonts loaded - using system fonts")
 
-    # Set Comic Neue as the default app-wide font for comic book feel
-    from PyQt6.QtGui import QFont
-    if "Comic Neue" in loaded_fonts:
-        app.setFont(QFont("Comic Neue", 12))
-        print("Set app-wide font: Comic Neue 12pt")
-    else:
-        print("Comic Neue not loaded - using system default font")
+    # Use system default font
+    print("Using system default font")
     
     main_window = LiminalBackroomsApp()
     

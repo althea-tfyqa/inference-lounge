@@ -65,6 +65,64 @@ from scenario_manager import get_ai_slots, get_num_ais, get_prompt, get_model, g
 
 
 # =============================================================================
+# DISPLAY NAME FORMATTING
+# =============================================================================
+
+def format_display_name(ai_name, model, custom_name=None):
+    """
+    Format a display name for speech bubbles based on available information.
+
+    Format:
+    - If custom_name provided: "CustomName (model)"
+    - If no custom_name: Use short model name extracted from full ID
+    - Example: "Gemini 3 Pro (google/gemini-3-pro-preview)"
+    - Example with custom name: "Research Assistant (google/gemini-3-pro-preview)"
+
+    Args:
+        ai_name: The AI slot identifier (e.g., "AI-1")
+        model: Full model ID (e.g., "anthropic/claude-sonnet-4.5")
+        custom_name: Optional custom display name from scenario
+
+    Returns:
+        Formatted display string
+    """
+    if not model:
+        return custom_name or ai_name
+
+    # Extract short model name from full ID
+    # Examples:
+    # "anthropic/claude-sonnet-4.5" -> "Claude Sonnet 4.5"
+    # "google/gemini-3-pro-preview" -> "Gemini 3 Pro"
+    # "x-ai/grok-4.1-fast" -> "Grok 4.1"
+
+    model_parts = model.split('/')
+    if len(model_parts) == 2:
+        provider, model_name = model_parts
+        # Simplify common patterns
+        if 'claude' in model_name.lower():
+            short_name = model_name.replace('claude-', '').replace('-', ' ').title()
+            short_name = f"Claude {short_name}"
+        elif 'gemini' in model_name.lower():
+            short_name = model_name.replace('gemini-', '').replace('-', ' ').title()
+            # Remove common suffixes
+            short_name = short_name.replace(' Preview', '').replace(' Advanced', '')
+            short_name = f"Gemini {short_name}"
+        elif 'grok' in model_name.lower():
+            short_name = model_name.replace('grok-', '').replace('-fast', '').replace('-', ' ').title()
+            short_name = f"Grok {short_name}"
+        elif 'gpt' in model_name.lower():
+            short_name = model_name.upper().replace('-', ' ')
+        else:
+            short_name = model_name.replace('-', ' ').title()
+    else:
+        short_name = model.replace('-', ' ').title()
+
+    # Use custom name if provided, otherwise use short model name
+    display_base = custom_name if custom_name else short_name
+    return f"{display_base} ({model})"
+
+
+# =============================================================================
 # MESSAGE WIDGET CHAT SYSTEM - Each message is a separate widget
 # =============================================================================
 # This solves scroll jumping because adding/updating messages doesn't destroy
@@ -254,17 +312,16 @@ class MessageWidget(QFrame):
         from PyQt6.QtWidgets import QSizePolicy
 
         bg_color = speaker_color or COMIC_COLORS['teal']
-        nameplate = QLabel(f"★ {name_text.upper()} ★")
+        nameplate = QLabel(name_text.upper())
         nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        nameplate.setFont(QFont("Bangers", 13))
+        nameplate.setFont(QFont("SF Pro Display", 12, QFont.Weight.Bold))
         nameplate.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg_color};
                 color: white;
                 font-size: 13px;
-                letter-spacing: 2px;
-                padding: 5px 14px;
-                border: 3px solid {COMIC_COLORS['black']};
+                letter-spacing: 1px;
+                padding: 4px 12px;
                 border-radius: 4px;
             }}
         """)
@@ -296,6 +353,7 @@ class MessageWidget(QFrame):
         """Setup thinking bubble animation with comic book style."""
         ai_name = self.message_data.get('ai_name', 'AI')
         model = self.message_data.get('model', '')
+        custom_name = self.message_data.get('custom_name')  # Get custom name if available
 
         # Use comic bubble color for background
         bubble_color = get_bubble_color(model or ai_name)
@@ -310,7 +368,7 @@ class MessageWidget(QFrame):
         """)
 
         # Create thinking bubble with nameplate
-        display_name = f"{ai_name} ({model})" if model else ai_name
+        display_name = format_display_name(ai_name, model, custom_name)
         thinking_bubble = ThinkingBubbleWithLabel(display_name, show_nameplate=True)
         thinking_bubble.start()  # Start the animation
         self.layout().addWidget(thinking_bubble)
@@ -405,8 +463,9 @@ class MessageWidget(QFrame):
             }}
         """)
         
-        # Header: "AI-X (model) generated an image using <image_model>"
-        display_name = f"{ai_name} ({model})" if model else ai_name
+        # Header: "NAME (model) generated an image using <image_model>"
+        custom_name = self.message_data.get('custom_name')  # Get custom name if available
+        display_name = format_display_name(ai_name, model, custom_name)
         header_text = f"{display_name} generated an image using {image_model}"
         header = self._create_header_widget(header_text, border_color)
         self.layout().addWidget(header)
@@ -445,8 +504,9 @@ class MessageWidget(QFrame):
             }}
         """)
         
-        # Header: "AI-X (model) generated a video using <video_model>"
-        display_name = f"{ai_name} ({model})" if model else ai_name
+        # Header: "NAME (model) generated a video using <video_model>"
+        custom_name = self.message_data.get('custom_name')  # Get custom name if available
+        display_name = format_display_name(ai_name, model, custom_name)
         header_text = f"{display_name} generated a video using {video_model}"
         header = self._create_header_widget(header_text, border_color)
         self.layout().addWidget(header)
@@ -473,9 +533,9 @@ class MessageWidget(QFrame):
         self.setStyleSheet(f"""
             MessageWidget {{
                 background-color: {bubble_color};
-                border: 3px solid {COMIC_COLORS['black']};
-                border-left: 8px solid {speaker_color};
-                border-radius: 20px;
+                border: 1px solid {COLORS['border']};
+                border-left: 5px solid {speaker_color};
+                border-radius: 8px;
                 padding: 10px;
             }}
         """)
@@ -497,6 +557,7 @@ class MessageWidget(QFrame):
         """Setup AI assistant message style with comic book theme."""
         ai_name = self.message_data.get('ai_name', 'AI')
         model = self.message_data.get('model', '')
+        custom_name = self.message_data.get('custom_name')  # Get custom name if available
 
         # Get bubble color and distinct speaker color
         bubble_color = get_bubble_color(model or ai_name)
@@ -506,16 +567,51 @@ class MessageWidget(QFrame):
         self.setStyleSheet(f"""
             MessageWidget {{
                 background-color: {bubble_color};
-                border: 3px solid {COMIC_COLORS['black']};
-                border-left: 8px solid {speaker_color};
-                border-radius: 20px;
+                border: 1px solid {COLORS['border']};
+                border-left: 5px solid {speaker_color};
+                border-radius: 8px;
                 padding: 10px;
             }}
         """)
 
-        display_name = f"{ai_name} ({model})" if model else ai_name
+        # Create horizontal layout for portrait + header
+        header_row = QWidget()
+        header_row.setStyleSheet("background-color: transparent;")
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+
+        # Add small circular portrait (30px)
+        portrait_label = QLabel()
+        portrait_label.setStyleSheet("background-color: transparent;")
+        portrait_path = get_portrait_path(model or ai_name)
+        portrait_pixmap = QPixmap(portrait_path)
+        if not portrait_pixmap.isNull():
+            # Create circular portrait
+            size = 30
+            scaled = portrait_pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+            # Create circular mask
+            from PyQt6.QtGui import QBitmap, QPainterPath
+            mask = QBitmap(size, size)
+            mask.fill(Qt.GlobalColor.color0)
+            painter = QPainter(mask)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(Qt.GlobalColor.color1)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(0, 0, size, size)
+            painter.end()
+            scaled.setMask(mask)
+            portrait_label.setPixmap(scaled)
+        portrait_label.setFixedSize(30, 30)
+        header_layout.addWidget(portrait_label, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+
+        # Add nameplate
+        display_name = format_display_name(ai_name, model, custom_name)
         header = self._create_comic_nameplate(display_name, speaker_color)
-        self.layout().addWidget(header)
+        header_layout.addWidget(header, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addStretch()
+
+        self.layout().addWidget(header_row)
 
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
@@ -531,7 +627,7 @@ class MessageWidget(QFrame):
         """Setup system message style."""
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: #F0EDE8;
+                background-color: #F3F4F6;
                 border-left: 3px solid {COMIC_COLORS['navy']};
                 border-radius: 0px;
             }}
@@ -727,11 +823,11 @@ class ChatScrollArea(QScrollArea):
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         
         # ─── Style ──────────────────────────────────────────────────────────
-        # Comic theme: cream paper background with texture
+        # Light background for conversation area
         self.setStyleSheet(f"""
             QScrollArea {{
                 background-color: {COMIC_COLORS['cream']};
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 0px;
             }}
             {get_scrollbar_style()}
@@ -1049,12 +1145,12 @@ class StartingPromptWidget(QWidget):
         # Editable text field (single line) — no dropdown, just free text
         self.text_field = QLineEdit()
         self.text_field.setPlaceholderText("Optionally seed the conversation or just hit Converse")
-        self.text_field.setFont(QFont("Comic Neue", 12))
+        self.text_field.setFont(QFont("SF Pro Text", 12))
         self.text_field.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #FFFFFF;
                 color: {COMIC_COLORS['black']};
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 4px;
                 padding: 6px 8px;
                 font-size: 12px;
@@ -1062,7 +1158,7 @@ class StartingPromptWidget(QWidget):
                 selection-color: white;
             }}
             QLineEdit:focus {{
-                border: 3px solid {COMIC_COLORS['teal']};
+                border: 1px solid {COMIC_COLORS['teal']};
             }}
         """)
         # Enter key triggers submit
@@ -2934,7 +3030,8 @@ class ConversationPane(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COMIC_COLORS['banner_red']},
                     stop:1 {COMIC_COLORS['banner_red_dark']});
-                border: 3px solid {COMIC_COLORS['black']};
+                border: none;
+                border-bottom: 1px solid {COLORS['border']};
                 border-radius: 0px;
                 padding: 6px 16px;
             }}
@@ -2944,14 +3041,14 @@ class ConversationPane(QWidget):
         banner_layout.setContentsMargins(0, 2, 0, 2)
         banner_layout.setSpacing(2)
 
-        # Title: "INFERENCE LOUNGE" in Bangers font, yellow, centered
+        # Title: "INFERENCE LOUNGE" in header
         self.title_label = QLabel("INFERENCE LOUNGE")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet(f"""
             QLabel {{
                 color: {COMIC_COLORS['banner_yellow']};
-                font-family: 'Bangers', 'Impact', 'Arial Black', sans-serif;
-                font-size: 28px;
+                font-family: 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+                font-size: 22px;
                 font-weight: bold;
                 letter-spacing: 3px;
                 background: transparent;
@@ -2990,7 +3087,7 @@ class ConversationPane(QWidget):
         self.entry_panel.setStyleSheet(f"""
             QWidget#entry_panel {{
                 background-color: {COMIC_COLORS['cream']};
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 0px;
             }}
         """)
@@ -3002,7 +3099,7 @@ class ConversationPane(QWidget):
         # Scenario selector
         scenario_row = QHBoxLayout()
         scenario_label = QLabel("Scenario:")
-        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px; font-family: 'Comic Neue';")
+        scenario_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px;")
         scenario_row.addWidget(scenario_label)
 
         self.scenario_selector = NoScrollComboBox()
@@ -3025,7 +3122,7 @@ class ConversationPane(QWidget):
             QCheckBox::indicator {{
                 width: 18px;
                 height: 18px;
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 3px;
                 background-color: white;
             }}
@@ -3049,8 +3146,8 @@ class ConversationPane(QWidget):
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Set font for the container (cascades to message widgets) — comic book body font
-        font = QFont("Comic Neue", 13)
+        # Set font for the container (cascades to message widgets)
+        font = QFont("SF Pro Text", 13)
         self.conversation_display.container.setFont(font)
 
         layout.addWidget(self.conversation_display, 1)  # Gets most space
@@ -3715,16 +3812,16 @@ class ConversationPane(QWidget):
         html += f".rabbithole {{ color: {COLORS['accent_green']}; }}"
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
         # Notification styles - error (pink), success (green), info (yellow)
-        html += f".notify-error {{ background-color: #1a1a2a; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
-        html += f".notify-success {{ background-color: #1a2a1a; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
-        html += f".notify-info {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".notify-error {{ background-color: #FEF2F2; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
+        html += f".notify-success {{ background-color: #F0FDF4; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
+        html += f".notify-info {{ background-color: #FFFBEB; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Legacy agent-notification class (defaults to info style)
-        html += f".agent-notification {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".agent-notification {{ background-color: #FFFBEB; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Code block styling - indented, visually distinct, contained within message
-        html += f"pre {{ background-color: #0F1419; border: 1px solid #2D3748; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
+        html += f"pre {{ background-color: #F3F4F6; border: 1px solid {COLORS['border']}; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
         html += f"code {{ font-family: 'Consolas', 'Monaco', 'Courier New', monospace; color: {COLORS['text_bright']}; font-size: 13px; line-height: 1.5; }}"
         # Inline code (not in pre block) - subtle background
-        html += f".inline-code {{ background-color: #0F1419; color: #22D3EE; border: 1px solid #2D3748; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
+        html += f".inline-code {{ background-color: #F3F4F6; color: {COLORS['accent_cyan_active']}; border: 1px solid {COLORS['border']}; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
         # Typing indicator styles
         html += f".typing-indicator {{ background-color: {COLORS['bg_medium']}; padding: 10px 12px; border-radius: 0px; margin: 12px 4px; }}"
         html += f".typing-dots {{ color: {COLORS['text_dim']}; font-style: italic; }}"
@@ -3987,11 +4084,11 @@ class ConversationPane(QWidget):
             QPushButton {{
                 background-color: {COMIC_COLORS['cream']};
                 color: {COMIC_COLORS['navy']};
-                border: 3px solid {COMIC_COLORS['black']};
-                border-radius: 8px;
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
                 padding: 8px 14px;
-                font-family: 'Bangers';
                 font-size: 14px;
+                font-weight: bold;
                 letter-spacing: 1px;
                 min-width: {current_width - 30}px;
                 max-width: {current_width}px;
@@ -4163,10 +4260,18 @@ class ConversationPane(QWidget):
         
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
-        
-        # Generate a timestamped folder name
+
+        # Get main window to access scenario name
+        main_window = self.window()
+        scenario_name = getattr(main_window, 'current_scenario', 'unknown')
+
+        # Sanitize scenario name for filesystem (remove special chars, limit length)
+        import re
+        scenario_slug = re.sub(r'[^\w\-]', '_', scenario_name)[:30]
+
+        # Generate a folder name with scenario and timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_folder_name = f"session_{timestamp}"
+        export_folder_name = f"session_{scenario_slug}_{timestamp}"
         
         # Let user select the parent directory (where timestamped folder will be created)
         selected_dir = QFileDialog.getExistingDirectory(
@@ -4198,9 +4303,8 @@ class ConversationPane(QWidget):
         try:
             # Create the export folder
             os.makedirs(folder_name, exist_ok=True)
-            
-            # Get main window for accessing session data
-            main_window = self.window()
+
+            # main_window already retrieved above for scenario name
             
             # Export conversation as multiple formats
             # Plain text - build from conversation data
@@ -4253,6 +4357,7 @@ class ConversationPane(QWidget):
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 f.write(f"Inference Lounge Session Export\n")
                 f.write(f"================================\n")
+                f.write(f"Scenario: {scenario_name}\n")
                 f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 f.write(f"Contents:\n")
                 f.write(f"- conversation.txt (plain text)\n")
@@ -4295,9 +4400,17 @@ class ConversationPane(QWidget):
             base_dir = os.path.join(os.getcwd(), "exports", "backups")
             os.makedirs(base_dir, exist_ok=True)
 
-            # Generate a timestamped folder name
+            # Get main window to access scenario name
+            main_window = self.window()
+            scenario_name = getattr(main_window, 'current_scenario', 'unknown')
+
+            # Sanitize scenario name for filesystem (remove special chars, limit length)
+            import re
+            scenario_slug = re.sub(r'[^\w\-]', '_', scenario_name)[:30]
+
+            # Generate a folder name with scenario and timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            export_folder_name = f"session_{timestamp}"
+            export_folder_name = f"session_{scenario_slug}_{timestamp}"
             folder_name = os.path.join(base_dir, export_folder_name)
 
             # Create the backup folder
@@ -4356,6 +4469,7 @@ class ConversationPane(QWidget):
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 f.write(f"Inference Lounge Session Auto-Backup\n")
                 f.write(f"=====================================\n")
+                f.write(f"Scenario: {scenario_name}\n")
                 f.write(f"Backed up: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 f.write(f"Contents:\n")
                 f.write(f"- conversation.txt (plain text)\n")
@@ -4595,7 +4709,7 @@ class LiminalBackroomsApp(QMainWindow):
                 background-color: {COMIC_COLORS['navy']};
                 color: white;
                 padding: 4px;
-                border-bottom: 3px solid {COMIC_COLORS['black']};
+                border-bottom: 1px solid {COLORS['border']};
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -4605,12 +4719,12 @@ class LiminalBackroomsApp(QMainWindow):
             }}
             QMenuBar::item:selected {{
                 background-color: {COMIC_COLORS['teal']};
-                color: {COMIC_COLORS['banner_yellow']};
+                color: white;
             }}
             QMenu {{
                 background-color: {COMIC_COLORS['cream']};
                 color: {COMIC_COLORS['black']};
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
             }}
             QMenu::item {{
                 padding: 8px 24px;
