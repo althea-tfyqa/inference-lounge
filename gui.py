@@ -3143,6 +3143,7 @@ class ConversationPane(QWidget):
         Extracts num_ais and default models from scenario data and
         updates the app state accordingly.
         """
+        print(f"[SCENARIO DEBUG] _on_scenario_changed called with: {scenario_name}")
         main_window = self.window()
         if hasattr(main_window, 'current_scenario'):
             main_window.current_scenario = scenario_name
@@ -3153,13 +3154,16 @@ class ConversationPane(QWidget):
             # Extract num_ais from scenario
             num_ais = get_num_ais(scenario_data)
             main_window.num_ais = num_ais
+            print(f"[SCENARIO DEBUG] Set num_ais to: {num_ais}")
 
             # Extract models from scenario - only load AIs actually defined
             ai_slots = get_ai_slots(scenario_data)
             main_window.ai_models = []
             for ai_name in ai_slots:
                 model = get_model(scenario_data, ai_name)
+                print(f"[SCENARIO DEBUG] Loading {ai_name}: {model}")
                 main_window.ai_models.append(model)
+            print(f"[SCENARIO DEBUG] Final ai_models list: {main_window.ai_models}")
 
             # Update config status display
             if hasattr(main_window, 'left_pane'):

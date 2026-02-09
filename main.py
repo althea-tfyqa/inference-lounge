@@ -1736,6 +1736,9 @@ class ConversationManager:
         participants = []
         num_ais = self.app.num_ais
 
+        print(f"[PORTRAIT DEBUG] Current scenario: {self.app.current_scenario}")
+        print(f"[PORTRAIT DEBUG] Current ai_models: {self.app.ai_models}")
+
         for i in range(1, num_ais + 1):
             ai_name = f"AI-{i}"
             model_id = self.app.ai_models[i - 1] if i <= len(self.app.ai_models) else "unknown"
@@ -1751,6 +1754,7 @@ class ConversationManager:
 
             # Get display name from scenario (falls back to AI-1, AI-2, etc. automatically)
             display_name = get_name(SYSTEM_PROMPT_PAIRS.get(self.app.current_scenario, {}), ai_name)
+            print(f"[PORTRAIT DEBUG] {ai_name}: model={model_id}, display_name={display_name}")
 
             # Store as (ai_name, model_name, display_name, color) for new portrait format
             participants.append((ai_name, provider_model, display_name, speaker_color))
