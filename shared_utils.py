@@ -938,7 +938,10 @@ def generate_image_from_text(text, model="openai/gpt-5-image-mini"):
                 }
             ],
             "modalities": ["image", "text"],
-            "max_tokens": 1024  # Limit tokens for image generation to avoid credit issues
+            # GPT-5 Image models have mandatory reasoning that consumes tokens before
+            # image generation — 1024 was too low and the model would exhaust its budget
+            # on reasoning alone, never producing the actual image.
+            "max_tokens": 16384
         }
         
         print(f"Generating image with {model}...")
@@ -946,82 +949,103 @@ def generate_image_from_text(text, model="openai/gpt-5-image-mini"):
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             data=json.dumps(payload),
-            timeout=60
+            timeout=120  # Image gen with mandatory reasoning can take a while
         )
-        
+
         if response.status_code == 200:
             result = response.json()
-            
+
             # The generated image will be in the assistant message
             if result.get("choices"):
                 message = result["choices"][0].get("message", {})
                 
-                # Check for images in the message
+                # Collect image URLs from the response — models return them in
+                # different places so we check both the dedicated `images` array
+                # and multipart `content` arrays.
+                image_urls = []
+
+                # Method 1: Dedicated images array (OpenRouter standard)
                 if message.get("images"):
-                    for image in message["images"]:
-                        image_url = image["image_url"]["url"]  # Base64 data URL
-                        print(f"Generated image URL (first 50 chars): {image_url[:50]}...")
-                        
-                        # Handle base64 data URL
-                        if image_url.startswith('data:image'):
-                            try:
-                                # Detect actual image format from data URL header
-                                # Format: data:image/jpeg;base64,... or data:image/png;base64,...
-                                ext = ".jpg"  # Default to jpg
-                                if image_url.startswith('data:image/png'):
-                                    ext = ".png"
-                                elif image_url.startswith('data:image/gif'):
-                                    ext = ".gif"
-                                elif image_url.startswith('data:image/webp'):
-                                    ext = ".webp"
-                                
-                                # Extract base64 data after comma
-                                base64_data = image_url.split(',', 1)[1] if ',' in image_url else image_url
-                                
-                                # Decode base64 to image
-                                image_data = base64.b64decode(base64_data)
-                                image_path = image_dir / f"generated_{timestamp}{ext}"
+                    for img in message["images"]:
+                        url = img.get("image_url", {}).get("url", "")
+                        if url:
+                            image_urls.append(url)
+                    print(f"[IMG] Found {len(image_urls)} image(s) in message.images")
+
+                # Method 2: Multipart content array (some models embed images here)
+                if not image_urls and isinstance(message.get("content"), list):
+                    for part in message["content"]:
+                        if isinstance(part, dict) and part.get("type") == "image_url":
+                            url = part.get("image_url", {}).get("url", "")
+                            if url:
+                                image_urls.append(url)
+                    if image_urls:
+                        print(f"[IMG] Found {len(image_urls)} image(s) in multipart content")
+
+                if image_urls:
+                    image_url = image_urls[0]  # Use the first image
+                    print(f"[IMG] Image URL (first 80 chars): {image_url[:80]}...")
+
+                    if image_url.startswith('data:image'):
+                        try:
+                            # Detect format from data URL header
+                            ext = ".jpg"
+                            if image_url.startswith('data:image/png'):
+                                ext = ".png"
+                            elif image_url.startswith('data:image/gif'):
+                                ext = ".gif"
+                            elif image_url.startswith('data:image/webp'):
+                                ext = ".webp"
+
+                            base64_data = image_url.split(',', 1)[1] if ',' in image_url else image_url
+                            image_data = base64.b64decode(base64_data)
+                            image_path = image_dir / f"generated_{timestamp}{ext}"
+                            with open(image_path, "wb") as f:
+                                f.write(image_data)
+
+                            print(f"[IMG] Saved to {image_path}")
+                            return {
+                                "success": True,
+                                "image_path": str(image_path),
+                                "timestamp": timestamp,
+                                "model": model
+                            }
+                        except Exception as e:
+                            print(f"[IMG] Failed to decode base64: {e}")
+                            return {
+                                "success": False,
+                                "error": f"Failed to decode image: {e}"
+                            }
+                    else:
+                        # Regular URL — download it
+                        try:
+                            img_response = requests.get(image_url, timeout=30)
+                            if img_response.status_code == 200:
+                                image_path = image_dir / f"generated_{timestamp}.png"
                                 with open(image_path, "wb") as f:
-                                    f.write(image_data)
-                                
-                                print(f"Generated image saved to {image_path}")
+                                    f.write(img_response.content)
+
+                                print(f"[IMG] Saved to {image_path}")
                                 return {
                                     "success": True,
                                     "image_path": str(image_path),
                                     "timestamp": timestamp,
                                     "model": model
                                 }
-                            except Exception as e:
-                                print(f"Failed to decode base64 image: {e}")
-                                return {
-                                    "success": False,
-                                    "error": f"Failed to decode image: {e}"
-                                }
-                        else:
-                            # If it's a regular URL, download it
-                            try:
-                                img_response = requests.get(image_url, timeout=30)
-                                if img_response.status_code == 200:
-                                    image_path = image_dir / f"generated_{timestamp}.png"
-                                    with open(image_path, "wb") as f:
-                                        f.write(img_response.content)
-                                    
-                                    print(f"Generated image saved to {image_path}")
-                                    return {
-                                        "success": True,
-                                        "image_path": str(image_path),
-                                        "timestamp": timestamp,
-                                        "model": model
-                                    }
-                            except Exception as e:
-                                print(f"Failed to download image: {e}")
-                                return {
-                                    "success": False,
-                                    "error": f"Failed to download image: {e}"
-                                }
-                
-                # No images in response
-                print(f"No images in response. Message keys: {list(message.keys()) if isinstance(message, dict) else 'non-dict'}")
+                        except Exception as e:
+                            print(f"[IMG] Failed to download: {e}")
+                            return {
+                                "success": False,
+                                "error": f"Failed to download image: {e}"
+                            }
+
+                # No images found anywhere in the response
+                content_preview = ""
+                if isinstance(message.get("content"), str):
+                    content_preview = f" Content: {message['content'][:200]}"
+                elif isinstance(message.get("content"), list):
+                    content_preview = f" Content types: {[p.get('type') for p in message['content'] if isinstance(p, dict)]}"
+                print(f"[IMG] No images found. Message keys: {list(message.keys())}{content_preview}")
                 return {
                     "success": False,
                     "error": "No images in API response"
