@@ -91,7 +91,7 @@ class ScenarioEditorDialog(QDialog):
                 font-weight: bold;
                 color: {COLORS['text_glow']};
                 padding: 4px;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
         """)
         layout.addWidget(header)
@@ -137,7 +137,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['text_glow']};
@@ -155,7 +155,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['border']};
@@ -182,7 +182,7 @@ class ScenarioEditorDialog(QDialog):
             QLabel {{
                 color: {COLORS['text_dim']};
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
         """)
         name_layout.addWidget(name_label)
@@ -195,7 +195,7 @@ class ScenarioEditorDialog(QDialog):
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
                 padding: 8px;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {COLORS['accent_cyan']};
@@ -239,7 +239,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['text_glow']};
@@ -261,7 +261,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['border']};
@@ -300,7 +300,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 10px 20px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: #C0392B;
@@ -321,7 +321,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 10px 20px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['border']};
@@ -339,7 +339,7 @@ class ScenarioEditorDialog(QDialog):
                 padding: 10px 20px;
                 border-radius: 4px;
                 font-weight: bold;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['text_glow']};
@@ -374,7 +374,7 @@ class ScenarioEditorDialog(QDialog):
                 font-weight: bold;
                 font-size: 13px;
                 padding: 4px;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
         """)
         container_layout.addWidget(header)
@@ -386,7 +386,7 @@ class ScenarioEditorDialog(QDialog):
             color: {COLORS['text_dim']};
             font-weight: bold;
             min-width: 100px;
-            font-family: 'Comic Neue';
+            font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
         """)
         name_row.addWidget(name_label)
 
@@ -398,7 +398,7 @@ class ScenarioEditorDialog(QDialog):
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
                 padding: 8px;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {COLORS['accent_cyan']};
@@ -416,7 +416,7 @@ class ScenarioEditorDialog(QDialog):
             color: {COLORS['text_dim']};
             font-weight: bold;
             min-width: 100px;
-            font-family: 'Comic Neue';
+            font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
         """)
         model_row.addWidget(model_label)
 
@@ -429,7 +429,7 @@ class ScenarioEditorDialog(QDialog):
                 border: 2px solid {COLORS['border']};
                 border-radius: 4px;
                 padding: 8px;
-                font-family: 'Comic Neue';
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
             }}
         """)
         # Style the popup view directly
@@ -459,7 +459,7 @@ class ScenarioEditorDialog(QDialog):
         prompt_label.setStyleSheet(f"""
             color: {COLORS['text_dim']};
             font-weight: bold;
-            font-family: 'Comic Neue';
+            font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
         """)
         prompt_header_row.addWidget(prompt_label)
         prompt_header_row.addStretch()
@@ -468,7 +468,7 @@ class ScenarioEditorDialog(QDialog):
         token_counter.setStyleSheet(f"""
             color: {COLORS['text_dim']};
             font-size: 10px;
-            font-family: 'Comic Neue';
+            font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
         """)
         prompt_header_row.addWidget(token_counter)
         container_layout.addLayout(prompt_header_row)

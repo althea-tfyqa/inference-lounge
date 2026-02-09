@@ -25,10 +25,10 @@ class ComicSpeechBubble(QWidget):
         self.ai_name = ai_name
         self.is_user = is_user
 
-        # Colors (from comic theme)
-        self.bg_color = QColor("#FFFFFF") if is_user else QColor("#F4E8D8")
-        self.outline_color = QColor("#1A1A1A")
-        self.text_color = QColor("#264653")
+        # Colors (neutral theme)
+        self.bg_color = QColor("#FFFFFF") if is_user else QColor("#F9FAFB")
+        self.outline_color = QColor("#D1D5DB")
+        self.text_color = QColor("#374151")
 
         # Setup
         self.setMinimumHeight(80)
@@ -41,15 +41,14 @@ class ComicSpeechBubble(QWidget):
 
         # Add nameplate if AI message
         if self.ai_name:
-            nameplate = QLabel(f"★ {self.ai_name.upper()} ★")
+            nameplate = QLabel(self.ai_name.upper())
             nameplate.setStyleSheet("""
                 QLabel {
-                    background: #2A9D8F;
+                    background: #3B82F6;
                     color: white;
                     font-weight: bold;
                     font-size: 11px;
                     padding: 4px 12px;
-                    border: 2px solid #1A1A1A;
                     border-radius: 4px;
                 }
             """)
@@ -60,9 +59,9 @@ class ComicSpeechBubble(QWidget):
         text_label.setWordWrap(True)
         text_label.setStyleSheet("""
             QLabel {
-                font-family: 'Comic Sans MS', 'Comic Neue', cursive;
+                font-family: 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
                 font-size: 13px;
-                color: #264653;
+                color: #374151;
                 background: transparent;
                 border: none;
             }
@@ -138,9 +137,9 @@ class CircularPortrait(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw teal circle background
-        teal_color = QColor("#2A9D8F")
-        border_color = QColor("#264653")
+        # Draw accent circle background
+        teal_color = QColor("#3B82F6")
+        border_color = QColor("#1F2937")
 
         # Outer border circle (darker teal)
         painter.setPen(QPen(border_color, 4))
@@ -155,8 +154,8 @@ class CircularPortrait(QWidget):
             pass
         else:
             # Placeholder - draw a simple face emoji
-            painter.setPen(QPen(QColor("#F4ACB7"), 1))
-            painter.setBrush(QBrush(QColor("#F4ACB7")))
+            painter.setPen(QPen(QColor("#DBEAFE"), 1))
+            painter.setBrush(QBrush(QColor("#DBEAFE")))
             painter.drawEllipse(15, 15, 90, 90)
 
         # Draw label below
@@ -182,7 +181,7 @@ class ComicPanel(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Draw thick black border
-        pen = QPen(QColor("#1A1A1A"), 4)
+        pen = QPen(QColor("#D1D5DB"), 2)
         painter.setPen(pen)
         painter.drawRect(2, 2, self.width() - 4, self.height() - 4)
 
@@ -214,7 +213,7 @@ if __name__ == "__main__":
     # Apply background
     central.setStyleSheet("""
         QWidget {
-            background: #F4E8D8;
+            background: #F9FAFB;
         }
     """)
 

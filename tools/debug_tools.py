@@ -38,7 +38,7 @@ class CyanArrowTreeWidget(QTreeWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._arrow_color = QColor("#06B6D4")  # Cyan
+        self._arrow_color = QColor("#3B82F6")  # Cyan
         self._arrow_hover_color = QColor("#38BDF8")  # Brighter cyan
         self._hovered_index = None
         self.setMouseTracking(True)
@@ -264,14 +264,14 @@ class StylesheetEditor(QWidget):
         
         # Header
         header = QLabel("Stylesheet Editor")
-        header.setStyleSheet("font-weight: bold; color: #06B6D4;")
+        header.setStyleSheet("font-weight: bold; color: #3B82F6;")
         layout.addWidget(header)
         
         # Editor
         self.editor = QPlainTextEdit()
         self.editor.setStyleSheet("""
             QPlainTextEdit {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
                 color: #E2E8F0;
                 border: 1px solid #334155;
                 font-family: 'Consolas', 'Monaco', monospace;
@@ -288,14 +288,14 @@ class StylesheetEditor(QWidget):
         self.apply_btn.clicked.connect(self._apply_stylesheet)
         self.apply_btn.setStyleSheet("""
             QPushButton {
-                background-color: #06B6D4;
-                color: #0A0E1A;
+                background-color: #3B82F6;
+                color: #FFFFFF;
                 border: none;
                 padding: 6px 12px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #0891B2;
+                background-color: #2563EB;
             }
         """)
         btn_layout.addWidget(self.apply_btn)
@@ -379,7 +379,7 @@ class PropertyInspector(QWidget):
         menu = QMenu(self.tree)
         menu.setStyleSheet("""
             QMenu {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
                 color: #E2E8F0;
                 border: 1px solid #334155;
             }
@@ -406,7 +406,7 @@ class PropertyInspector(QWidget):
         """Get stylesheet for tree widget - uses cyan accent for selection"""
         return """
             QTreeWidget {
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
                 color: #CBD5E1;
                 border: 1px solid #334155;
                 font-size: 10px;
@@ -416,13 +416,13 @@ class PropertyInspector(QWidget):
             }
             QTreeWidget::item:selected {
                 background-color: #164E63;
-                border-left: 2px solid #06B6D4;
+                border-left: 2px solid #3B82F6;
             }
             QTreeWidget::item:hover:!selected {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
             }
             QHeaderView::section {
-                background-color: #111827;
+                background-color: #F3F4F6;
                 color: #94A3B8;
                 border: none;
                 padding: 4px;
@@ -441,7 +441,7 @@ class PropertyInspector(QWidget):
         def create_section(name, expanded=True):
             item = QTreeWidgetItem([name, ""])
             item.setExpanded(expanded)
-            item.setForeground(0, QColor("#06B6D4"))  # Cyan for section headers
+            item.setForeground(0, QColor("#3B82F6"))  # Cyan for section headers
             return item
             
         # Basic info
@@ -650,7 +650,7 @@ class WidgetTree(QWidget):
         menu = QMenu(self.tree)
         menu.setStyleSheet("""
             QMenu {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
                 color: #E2E8F0;
                 border: 1px solid #334155;
             }
@@ -677,7 +677,7 @@ class WidgetTree(QWidget):
         """Get stylesheet for tree widget - uses cyan accent for selection"""
         return """
             QTreeWidget {
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
                 color: #CBD5E1;
                 border: 1px solid #334155;
                 font-size: 10px;
@@ -687,13 +687,13 @@ class WidgetTree(QWidget):
             }
             QTreeWidget::item:selected {
                 background-color: #164E63;
-                border-left: 2px solid #06B6D4;
+                border-left: 2px solid #3B82F6;
             }
             QTreeWidget::item:hover:!selected {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
             }
             QHeaderView::section {
-                background-color: #111827;
+                background-color: #F3F4F6;
                 color: #94A3B8;
                 border: none;
                 padding: 4px;
@@ -748,7 +748,7 @@ class WidgetTree(QWidget):
         if popups_found:
             # Add a "Popups" parent item
             popups_item = QTreeWidgetItem(["[Popups]", ""])
-            popups_item.setForeground(0, QColor("#06B6D4"))
+            popups_item.setForeground(0, QColor("#3B82F6"))
             self.tree.addTopLevelItem(popups_item)
             popups_item.setExpanded(True)
             
@@ -1018,14 +1018,14 @@ class DebugPanel(QDockWidget):
         """Create custom title bar with painted icons"""
         title_bar = QWidget()
         title_bar.setObjectName("DebugPanelTitleBar")
-        title_bar.setStyleSheet("background-color: #111827;")
+        title_bar.setStyleSheet("background-color: #F3F4F6;")
         layout = QHBoxLayout(title_bar)
         layout.setContentsMargins(8, 4, 4, 4)
         layout.setSpacing(6)
         
         # Title
         title_label = QLabel("Debug Tools")
-        title_label.setStyleSheet("color: #06B6D4; font-weight: bold; font-size: 11px;")
+        title_label.setStyleSheet("color: #3B82F6; font-weight: bold; font-size: 11px;")
         layout.addWidget(title_label)
         
         layout.addStretch()
@@ -1080,17 +1080,17 @@ class DebugPanel(QDockWidget):
         tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #334155;
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
             }
             QTabBar::tab {
-                background-color: #111827;
+                background-color: #F3F4F6;
                 color: #94A3B8;
                 padding: 8px 16px;
                 border: none;
             }
             QTabBar::tab:selected {
-                background-color: #1E293B;
-                color: #06B6D4;
+                background-color: #E5E7EB;
+                color: #3B82F6;
             }
         """)
         
@@ -1115,30 +1115,30 @@ class DebugPanel(QDockWidget):
     def _apply_styling(self):
         self.setStyleSheet("""
             QDockWidget {
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
                 color: #E2E8F0;
                 font-size: 11px;
             }
             QPushButton {
-                background-color: #1E293B;
+                background-color: #E5E7EB;
                 color: #E2E8F0;
                 border: 1px solid #334155;
                 padding: 6px 12px;
             }
             QPushButton:hover {
                 background-color: #334155;
-                border-color: #06B6D4;
+                border-color: #3B82F6;
             }
             /* Standardized scrollbar style - retro CRT theme */
             QScrollBar:vertical {
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
                 width: 12px;
-                border: 1px solid #1E293B;
+                border: 1px solid #E5E7EB;
                 border-radius: 0px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background-color: #06B6D4;
+                background-color: #3B82F6;
                 border: none;
                 border-radius: 0px;
                 min-height: 30px;
@@ -1155,14 +1155,14 @@ class DebugPanel(QDockWidget):
                 background: none;
             }
             QScrollBar:horizontal {
-                background-color: #0A0E1A;
+                background-color: #FFFFFF;
                 height: 12px;
-                border: 1px solid #1E293B;
+                border: 1px solid #E5E7EB;
                 border-radius: 0px;
                 margin: 0px;
             }
             QScrollBar::handle:horizontal {
-                background-color: #06B6D4;
+                background-color: #3B82F6;
                 border: none;
                 border-radius: 0px;
                 min-width: 30px;
@@ -1196,7 +1196,7 @@ class DebugPanel(QDockWidget):
         class_name = widget.__class__.__name__
         obj_name = widget.objectName() or "(unnamed)"
         self.selected_label.setText(f"{class_name}: {obj_name}")
-        self.selected_label.setStyleSheet("color: #06B6D4; font-weight: bold;")
+        self.selected_label.setStyleSheet("color: #3B82F6; font-weight: bold;")
         
         # Update inspectors
         self.property_inspector.inspect_widget(widget)
@@ -1335,7 +1335,7 @@ if __name__ == "__main__":
     # Apply dark theme
     window.setStyleSheet("""
         QMainWindow {
-            background-color: #0A0E1A;
+            background-color: #FFFFFF;
         }
     """)
     
@@ -1344,16 +1344,16 @@ if __name__ == "__main__":
     layout = QVBoxLayout(central)
     
     label = QLabel("Test Label")
-    label.setStyleSheet("color: #06B6D4; font-size: 14px;")
+    label.setStyleSheet("color: #3B82F6; font-size: 14px;")
     layout.addWidget(label)
     
     combo = QComboBox()
     combo.addItems(["Option 1", "Option 2", "Option 3"])
     combo.setStyleSheet("""
         QComboBox {
-            background-color: #111827;
+            background-color: #F3F4F6;
             color: #CBD5E1;
-            border: 1px solid #06B6D4;
+            border: 1px solid #3B82F6;
             padding: 8px;
         }
     """)
@@ -1362,8 +1362,8 @@ if __name__ == "__main__":
     button = QPushButton("Test Button")
     button.setStyleSheet("""
         QPushButton {
-            background-color: #06B6D4;
-            color: #0A0E1A;
+            background-color: #3B82F6;
+            color: #FFFFFF;
             border: none;
             padding: 10px 20px;
             font-weight: bold;

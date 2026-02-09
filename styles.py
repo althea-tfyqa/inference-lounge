@@ -10,62 +10,62 @@ Usage:
 """
 
 # =============================================================================
-# COLOR PALETTE - Cyberpunk Theme
+# COLOR PALETTE - Neutral Light Theme
 # =============================================================================
 
 COLORS = {
-    # Backgrounds - darker, moodier
-    'bg_dark': '#0A0E1A',           # Deep blue-black
-    'bg_medium': '#111827',         # Slate dark
-    'bg_light': '#1E293B',          # Lighter slate
-    
-    # Primary accents - neon but muted
-    'accent_cyan': '#06B6D4',       # Cyan (primary)
-    'accent_cyan_hover': '#0891B2',
-    'accent_cyan_active': '#0E7490',
-    
+    # Backgrounds - clean light palette
+    'bg_dark': '#FFFFFF',           # White (dialog backgrounds)
+    'bg_medium': '#F3F4F6',         # Gray-100 (secondary bg)
+    'bg_light': '#E5E7EB',          # Gray-200 (tertiary bg)
+
+    # Primary accents - blue
+    'accent_cyan': '#3B82F6',       # Blue-500 (primary)
+    'accent_cyan_hover': '#2563EB', # Blue-600
+    'accent_cyan_active': '#1D4ED8', # Blue-700
+
     # Secondary accents
-    'accent_pink': '#EC4899',       # Hot pink (secondary)
-    'accent_purple': '#A855F7',     # Purple (tertiary)
-    'accent_yellow': '#FBBF24',     # Amber for warnings
-    'accent_green': '#10B981',      # Emerald (rabbithole)
-    
+    'accent_pink': '#EC4899',       # Pink-500 (secondary)
+    'accent_purple': '#8B5CF6',     # Violet-500 (tertiary)
+    'accent_yellow': '#F59E0B',     # Amber-500 for warnings
+    'accent_green': '#10B981',      # Emerald-500
+
     # AI-specific colors (for chat message headers)
-    'ai_1': '#6FFFE6',              # Bright Aqua - AI-1
-    'ai_2': '#06E2D4',              # Teal - AI-2
-    'ai_3': '#54F5E9',              # Turquoise - AI-3
-    'ai_4': '#8BFCEF',              # Light Cyan - AI-4
-    'ai_5': '#91FCFD',              # Pale Cyan - AI-5
-    'human': '#ff00b3',             # Hot Pink/Magenta - Human User
-    
+    'ai_1': '#2563EB',              # Blue-600 - AI-1
+    'ai_2': '#0D9488',              # Teal-600 - AI-2
+    'ai_3': '#7C3AED',              # Violet-600 - AI-3
+    'ai_4': '#DB2777',              # Pink-600 - AI-4
+    'ai_5': '#EA580C',              # Orange-600 - AI-5
+    'human': '#4F46E5',             # Indigo-600 - Human User
+
     # Notification colors
-    'notify_error': '#ff4444',      # Bright Red - Error/Failure notifications (distinct from human pink)
-    'notify_success': '#5DFF44',    # Bright Green - Success notifications
-    'notify_info': '#FFFF48',       # Yellow - Informational notifications
-    
+    'notify_error': '#DC2626',      # Red-600 - Error/Failure notifications
+    'notify_success': '#16A34A',    # Green-600 - Success notifications
+    'notify_info': '#D97706',       # Amber-600 - Informational notifications
+
     # Text colors
-    'text_normal': '#CBD5E1',       # Slate-200
-    'text_dim': '#64748B',          # Slate-500
-    'text_bright': '#F1F5F9',       # Slate-50
-    'text_glow': '#38BDF8',         # Sky-400 (glowing text)
-    'text_timestamp': '#7a8899',    # Subtle timestamp color - readable but not distracting
-    'text_error': '#ff4444',        # Red - Error text (matches notify_error)
-    
+    'text_normal': '#374151',       # Gray-700 (body text)
+    'text_dim': '#9CA3AF',          # Gray-400 (subtle text)
+    'text_bright': '#111827',       # Gray-900 (bold text)
+    'text_glow': '#1D4ED8',         # Blue-700 (section headers)
+    'text_timestamp': '#6B7280',    # Gray-500 (timestamps)
+    'text_error': '#DC2626',        # Red-600 (error text)
+
     # Borders and effects
-    'border': '#1E293B',            # Slate-800
-    'border_glow': '#06B6D4',       # Glowing cyan borders
-    'border_highlight': '#334155',  # Slate-700
-    'shadow': 'rgba(6, 182, 212, 0.2)',  # Cyan glow shadows
-    
+    'border': '#D1D5DB',            # Gray-300
+    'border_glow': '#93C5FD',       # Blue-300 (accent borders)
+    'border_highlight': '#E5E7EB',  # Gray-200 (highlights)
+    'shadow': 'rgba(59, 130, 246, 0.1)',  # Blue shadow
+
     # Legacy color mappings for compatibility
-    'accent_blue': '#06B6D4',       # Map old blue to cyan
-    'accent_blue_hover': '#0891B2',
-    'accent_blue_active': '#0E7490',
+    'accent_blue': '#3B82F6',       # Blue-500
+    'accent_blue_hover': '#2563EB', # Blue-600
+    'accent_blue_active': '#1D4ED8', # Blue-700
     'accent_orange': '#F59E0B',     # Amber-500
-    'chain_of_thought': '#10B981',  # Emerald
-    'user_header': '#06B6D4',       # Cyan
-    'ai_header': '#A855F7',         # Purple
-    'system_message': '#F59E0B',    # Amber
+    'chain_of_thought': '#10B981',  # Emerald-500
+    'user_header': '#3B82F6',       # Blue-500
+    'ai_header': '#8B5CF6',         # Violet-500
+    'system_message': '#F59E0B',    # Amber-500
 }
 
 
@@ -74,10 +74,10 @@ COLORS = {
 # =============================================================================
 
 FONTS = {
-    # Primary fonts
-    'family_mono': "'Iosevka Term', 'Consolas', 'Monaco', monospace",
-    'family_display': "'Orbitron', sans-serif",
-    'family_ui': "'Segoe UI', sans-serif",
+    # Primary fonts - system defaults
+    'family_mono': "'SF Mono', 'Consolas', 'Monaco', monospace",
+    'family_display': "'SF Pro Display', 'Segoe UI', system-ui, sans-serif",
+    'family_ui': "'SF Pro Text', 'Segoe UI', system-ui, sans-serif",
 
     # Font sizes
     'size_xs': '8px',
@@ -126,30 +126,30 @@ PORTRAIT_MAP = {
     'generic': 'generic-ai.png',  # Fallback for unknown models
 }
 
-# Comic book theme colors (for future full theme implementation)
+# Theme colors — neutral light palette (keys preserved for future re-theming)
 COMIC_COLORS = {
-    'banner_red': '#E63946',        # Red banner background
-    'banner_red_dark': '#C81F2A',   # Darker red gradient
-    'banner_yellow': '#FFD60A',     # Yellow title text
-    'teal': '#2A9D8F',             # Teal accents (portrait frames, nameplate)
-    'teal_dark': '#1A7A6E',        # Darker teal gradient
-    'navy': '#264653',             # Navy (portrait label background)
-    'cream': '#F4E8D8',            # Cream paper background
-    'gold': '#E9C46A',             # Gold (input area)
-    'black': '#1A1A1A',            # Black borders and outlines
-    'pink': '#F4ACB7',             # Pink accents
+    'banner_red': '#374151',        # Gray-700 (app header bg)
+    'banner_red_dark': '#1F2937',   # Gray-800 (header gradient)
+    'banner_yellow': '#FFFFFF',     # White (header title text)
+    'teal': '#3B82F6',             # Blue-500 (primary accent)
+    'teal_dark': '#2563EB',        # Blue-600 (accent dark)
+    'navy': '#1F2937',             # Gray-800 (dark containers)
+    'cream': '#F9FAFB',            # Gray-50 (main backgrounds)
+    'gold': '#F3F4F6',             # Gray-100 (input area bg)
+    'black': '#111827',            # Gray-900 (borders/outlines)
+    'pink': '#DBEAFE',             # Blue-100 (subtle accents)
 }
 
-# Comic book fonts (for future implementation)
+# Theme fonts — system defaults (keys preserved for future re-theming)
 COMIC_FONTS = {
-    'family_title': "'Bangers', cursive",                      # Bold display font for titles
-    'family_body': "'Comic Neue', 'Comic Sans MS', cursive",   # Body text font
-    'family_mono': "'Courier New', monospace",                 # Monospace for technical text
+    'family_title': "'SF Pro Display', 'Segoe UI', system-ui, sans-serif",  # Display font for titles
+    'family_body': "'SF Pro Text', 'Segoe UI', system-ui, sans-serif",     # Body text font
+    'family_mono': "'SF Mono', 'Consolas', 'Monaco', monospace",           # Monospace for technical text
 }
 
 
 # =============================================================================
-# COMIC THEME HELPER FUNCTIONS
+# THEME HELPER FUNCTIONS
 # =============================================================================
 
 def get_portrait_path(model_or_provider):
@@ -214,7 +214,7 @@ def get_bubble_color(model_or_provider):
 # =============================================================================
 
 def get_combobox_style():
-    """Get the style for comboboxes - cyberpunk themed."""
+    """Get the style for comboboxes."""
     return f"""
         QComboBox {{
             background-color: {COLORS['bg_medium']};
@@ -255,8 +255,8 @@ def get_combobox_style():
             padding-left: 8px;
         }}
         QComboBox QAbstractItemView::item:selected {{
-            background-color: #164E63;
-            color: {COLORS['text_bright']};
+            background-color: {COLORS['accent_cyan']};
+            color: #FFFFFF;
         }}
         QComboBox QAbstractItemView::item:hover {{
             background-color: {COLORS['bg_light']};
@@ -267,8 +267,8 @@ def get_combobox_style():
 
 def get_button_style(accent_color=None):
     """
-    Get cyberpunk-themed button style.
-    
+    Get button style.
+
     Args:
         accent_color: Override accent color (defaults to accent_cyan)
     """
@@ -299,7 +299,7 @@ def get_button_style(accent_color=None):
 
 
 def get_input_style():
-    """Get style for text inputs - cyberpunk themed."""
+    """Get style for text inputs."""
     return f"""
         QLineEdit, QTextEdit {{
             background-color: {COLORS['bg_medium']};
@@ -355,7 +355,7 @@ def get_label_style(style_type='normal'):
 
 
 def get_checkbox_style():
-    """Get style for checkboxes - cyberpunk themed."""
+    """Get style for checkboxes."""
     return f"""
         QCheckBox {{
             color: {COLORS['text_dim']};
@@ -382,12 +382,11 @@ def get_checkbox_style():
 
 def get_scrollbar_style():
     """
-    Get style for scrollbars - retro CRT/cyberpunk theme.
-    
+    Get style for scrollbars.
+
     Features:
-    - No rounded corners (sharp edges for retro look)
-    - Cyan glow on hover
-    - Minimal design
+    - Clean, minimal design
+    - Blue accent on hover
     """
     return f"""
         QScrollBar:vertical {{
@@ -511,28 +510,28 @@ def get_menu_style():
 
 
 # =============================================================================
-# COMIC THEME - Widget Style Generators
+# THEMED WIDGET STYLE GENERATORS
 # =============================================================================
 
 # Color mapping for GroupedModelComboBox (expects cyberpunk-style keys).
-# Maps those keys to comic theme equivalents so the delegate renders in-theme.
+# Maps those keys to neutral theme equivalents so the delegate renders in-theme.
 COMIC_COLORS_FULL = {
     'bg_dark': COMIC_COLORS['cream'],           # Dropdown list background
     'bg_medium': '#FFFFFF',                      # Combo box background (white)
-    'bg_light': '#EDE4D4',                       # Hover highlight
+    'bg_light': '#E5E7EB',                       # Hover highlight (gray-200)
     'text_bright': COMIC_COLORS['black'],        # Bold text
-    'text_normal': '#333333',                    # Normal text
-    'accent_cyan': COMIC_COLORS['teal'],         # Accent color (teal instead of cyan)
+    'text_normal': '#374151',                    # Normal text (gray-700)
+    'accent_cyan': COMIC_COLORS['teal'],         # Accent color (blue)
 }
 
 
 def get_comic_combobox_style():
-    """Get comic-themed combobox style — cream/white background, black borders, teal accents."""
+    """Get neutral-themed combobox style — white background, subtle borders, blue accents."""
     return f"""
         QComboBox {{
             background-color: #FFFFFF;
             color: {COMIC_COLORS['black']};
-            border: 3px solid {COMIC_COLORS['black']};
+            border: 1px solid {COLORS['border']};
             border-radius: 4px;
             padding: 5px 10px;
             min-height: 24px;
@@ -540,13 +539,13 @@ def get_comic_combobox_style():
             font-family: {COMIC_FONTS['family_body']};
         }}
         QComboBox:hover {{
-            border: 3px solid {COMIC_COLORS['teal']};
+            border: 1px solid {COMIC_COLORS['teal']};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 22px;
-            border-left: 3px solid {COMIC_COLORS['black']};
+            border-left: 1px solid {COLORS['border']};
             border-radius: 0px;
         }}
         QComboBox::down-arrow {{
@@ -557,7 +556,7 @@ def get_comic_combobox_style():
         QComboBox QAbstractItemView {{
             background-color: {COMIC_COLORS['cream']};
             color: {COMIC_COLORS['black']};
-            border: 3px solid {COMIC_COLORS['black']};
+            border: 1px solid {COLORS['border']};
             border-radius: 0px;
             padding: 2px;
             outline: none;
@@ -572,7 +571,7 @@ def get_comic_combobox_style():
             color: white;
         }}
         QComboBox QAbstractItemView::item:hover {{
-            background-color: #EDE4D4;
+            background-color: #E5E7EB;
             color: {COMIC_COLORS['black']};
         }}
     """
@@ -580,10 +579,10 @@ def get_comic_combobox_style():
 
 def get_comic_button_style(variant='primary'):
     """
-    Get comic-themed button style.
+    Get themed button style.
 
     Args:
-        variant: 'primary' (red/yellow), 'secondary' (teal/white), or 'subtle' (transparent/teal)
+        variant: 'primary' (gray/white), 'secondary' (blue/white), or 'subtle' (transparent/blue)
     """
     if variant == 'primary':
         return f"""
@@ -592,27 +591,26 @@ def get_comic_button_style(variant='primary'):
                     stop:0 {COMIC_COLORS['banner_red']},
                     stop:1 {COMIC_COLORS['banner_red_dark']});
                 color: {COMIC_COLORS['banner_yellow']};
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COMIC_COLORS['black']};
                 border-radius: 6px;
                 padding: 8px 14px;
                 font-family: {COMIC_FONTS['family_title']};
                 font-size: 14px;
                 font-weight: bold;
-                text-transform: uppercase;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #F04A57,
+                    stop:0 #4B5563,
                     stop:1 {COMIC_COLORS['banner_red']});
             }}
             QPushButton:pressed {{
                 background: {COMIC_COLORS['banner_red_dark']};
             }}
             QPushButton:disabled {{
-                background: #CCCCCC;
-                color: #888888;
-                border-color: #999999;
+                background: #E5E7EB;
+                color: #9CA3AF;
+                border-color: #D1D5DB;
             }}
         """
     elif variant == 'secondary':
@@ -622,7 +620,7 @@ def get_comic_button_style(variant='primary'):
                     stop:0 {COMIC_COLORS['teal']},
                     stop:1 {COMIC_COLORS['teal_dark']});
                 color: white;
-                border: 3px solid {COMIC_COLORS['black']};
+                border: 1px solid {COMIC_COLORS['black']};
                 border-radius: 6px;
                 padding: 10px 16px;
                 font-family: {COMIC_FONTS['family_title']};
@@ -632,16 +630,16 @@ def get_comic_button_style(variant='primary'):
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #35B8A8,
+                    stop:0 #60A5FA,
                     stop:1 {COMIC_COLORS['teal']});
             }}
             QPushButton:pressed {{
                 background: {COMIC_COLORS['teal_dark']};
             }}
             QPushButton:disabled {{
-                background: #CCCCCC;
-                color: #888888;
-                border-color: #999999;
+                background: #E5E7EB;
+                color: #9CA3AF;
+                border-color: #D1D5DB;
             }}
         """
     else:  # subtle
@@ -649,7 +647,7 @@ def get_comic_button_style(variant='primary'):
             QPushButton {{
                 background: transparent;
                 color: {COMIC_COLORS['teal']};
-                border: 3px solid {COMIC_COLORS['teal']};
+                border: 1px solid {COMIC_COLORS['teal']};
                 border-radius: 6px;
                 padding: 10px 16px;
                 font-family: {COMIC_FONTS['family_body']};
@@ -667,8 +665,8 @@ def get_comic_button_style(variant='primary'):
             }}
             QPushButton:disabled {{
                 background: transparent;
-                color: #AAAAAA;
-                border-color: #CCCCCC;
+                color: #9CA3AF;
+                border-color: #D1D5DB;
             }}
         """
 
