@@ -8,7 +8,7 @@ Shows in conversation area while AI is generating a response.
 from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QRect, pyqtProperty
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
-from styles import get_bubble_color, COMIC_COLORS
+from styles import get_bubble_color, COMIC_COLORS, COLORS
 import math
 
 
@@ -75,13 +75,13 @@ class ThinkingBubbleWidget(QWidget):
 
         # Draw rounded bubble background
         bubble_color = QColor(self.bubble_color)
-        border_color = QColor(COMIC_COLORS['black'])
+        border_color = QColor(COLORS['border'])
 
         # Bubble dimensions
         bubble_rect = QRect(4, 4, self.width() - 8, self.height() - 8)
 
-        # Draw border (3px thick black)
-        painter.setPen(QPen(border_color, 3))
+        # Draw border (1px)
+        painter.setPen(QPen(border_color, 1))
         painter.setBrush(QBrush(bubble_color))
         painter.drawRoundedRect(bubble_rect, 20, 20)
 
@@ -89,7 +89,7 @@ class ThinkingBubbleWidget(QWidget):
         center_y = self.height() // 2
         start_x = (self.width() - (2 * self.dot_spacing)) // 2
 
-        dot_color = QColor(COMIC_COLORS['navy'])
+        dot_color = QColor(COLORS['text_dim'])
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(dot_color))
 
@@ -129,20 +129,16 @@ class ThinkingBubbleWithLabel(QWidget):
 
         if show_nameplate:
             # Create nameplate
-            self.nameplate = QLabel(f"★ {speaker_name.upper()} ★")
+            self.nameplate = QLabel(speaker_name)
             self.nameplate.setParent(self)
-            self.nameplate.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
             self.nameplate.setStyleSheet(f"""
                 QLabel {{
-                    background-color: {COMIC_COLORS['teal']};
-                    color: white;
-                    font-weight: bold;
+                    background-color: transparent;
+                    color: {COLORS['text_dim']};
+                    font-weight: 600;
                     font-size: 11px;
-                    text-transform: uppercase;
-                    letter-spacing: 1px;
-                    padding: 4px 12px;
-                    border: 2px solid {COMIC_COLORS['black']};
-                    border-radius: 4px;
+                    padding: 2px 4px;
                 }}
             """)
             self.nameplate.adjustSize()
@@ -193,7 +189,7 @@ if __name__ == "__main__":
     demo.resize(400, 500)
     demo.setStyleSheet(f"""
         QWidget {{
-            background-color: {COMIC_COLORS['cream']};
+            background-color: {COLORS['bg_medium']};
         }}
     """)
 

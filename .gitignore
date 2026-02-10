@@ -160,6 +160,7 @@ cython_debug/
 #.idea/
 
 # Project specific
+scenarios_personal.py
 images/*
 !images/.gitkeep
 exports/*

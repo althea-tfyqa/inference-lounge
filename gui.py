@@ -26,7 +26,7 @@ import subprocess
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
-from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect, QDialog
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect, QDialog, QSpinBox
 
 from config import (
     AI_MODELS,
@@ -314,7 +314,7 @@ class MessageWidget(QFrame):
         bg_color = speaker_color or COMIC_COLORS['teal']
         nameplate = QLabel(name_text.upper())
         nameplate.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        nameplate.setFont(QFont("SF Pro Display", 12, QFont.Weight.Bold))
+        nameplate.setFont(QFont(".AppleSystemUIFont", 12, QFont.Weight.Bold))
         nameplate.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg_color};
@@ -581,14 +581,14 @@ class MessageWidget(QFrame):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
 
-        # Add small circular portrait (30px)
+        # Add circular portrait (44px)
         portrait_label = QLabel()
         portrait_label.setStyleSheet("background-color: transparent;")
         portrait_path = get_portrait_path(model or ai_name)
         portrait_pixmap = QPixmap(portrait_path)
         if not portrait_pixmap.isNull():
             # Create circular portrait
-            size = 30
+            size = 44
             scaled = portrait_pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
             # Create circular mask
             from PyQt6.QtGui import QBitmap, QPainterPath
@@ -602,7 +602,7 @@ class MessageWidget(QFrame):
             painter.end()
             scaled.setMask(mask)
             portrait_label.setPixmap(scaled)
-        portrait_label.setFixedSize(30, 30)
+        portrait_label.setFixedSize(44, 44)
         header_layout.addWidget(portrait_label, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
         # Add nameplate
@@ -1115,14 +1115,12 @@ class GlowButton(QPushButton):
 
 class StartingPromptWidget(QWidget):
     """
-    Horizontal widget combining prompt dropdown + inline editable text field + token counter.
+    Horizontal widget with label + inline editable text field for seeding conversations.
 
-    Layout: [ Starting prompt: ] [ Debate ▾ ] [ Take opposing positions and debate... ] [ ~12 tokens ]
+    Layout: [ Starting Prompt: ] [ Optionally seed the conversation... ]
 
-    - Dropdown populates text field when a prompt is selected
-    - User can freely edit the text before submitting
+    - User can freely type a starting prompt before submitting
     - Single-line QLineEdit for clean, compact appearance
-    - Token counter updates live as user types
     """
 
     # Signal emitted when Enter is pressed in the text field
@@ -1145,7 +1143,7 @@ class StartingPromptWidget(QWidget):
         # Editable text field (single line) — no dropdown, just free text
         self.text_field = QLineEdit()
         self.text_field.setPlaceholderText("Optionally seed the conversation or just hit Converse")
-        self.text_field.setFont(QFont("SF Pro Text", 12))
+        self.text_field.setFont(QFont(".AppleSystemUIFont", 12))
         self.text_field.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #FFFFFF;
@@ -1163,20 +1161,7 @@ class StartingPromptWidget(QWidget):
         """)
         # Enter key triggers submit
         self.text_field.returnPressed.connect(self.returnPressed)
-        # Live token counter
-        self.text_field.textChanged.connect(self._update_token_counter)
         layout.addWidget(self.text_field, 1)  # Stretch to fill available space
-
-        # Token counter
-        self.token_counter = QLabel("~0 tokens")
-        self.token_counter.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 10px;")
-        self.token_counter.setMinimumWidth(70)
-        layout.addWidget(self.token_counter)
-
-    def _update_token_counter(self, text):
-        """Update token count estimate based on text length."""
-        token_estimate = len(text) // 4 if text else 0
-        self.token_counter.setText(f"~{token_estimate} tokens")
 
     def get_prompt_text(self):
         """Get the current text from the input field."""
@@ -1312,15 +1297,23 @@ class DepthGauge(QWidget):
         self.setFixedWidth(24)
         self.setMinimumHeight(100)
         
-        # Animation
+        # Animation — only runs when conversation is active
         self.pulse_offset = 0
         self.pulse_timer = QTimer(self)
         self.pulse_timer.timeout.connect(self._animate_pulse)
-        self.pulse_timer.start(50)
-        
+
     def _animate_pulse(self):
         self.pulse_offset = (self.pulse_offset + 2) % 360
         self.update()
+
+    def start_pulse(self):
+        """Start pulse animation (call when conversation is running)"""
+        if not self.pulse_timer.isActive():
+            self.pulse_timer.start(50)
+
+    def stop_pulse(self):
+        """Stop pulse animation (call when conversation completes)"""
+        self.pulse_timer.stop()
     
     def set_progress(self, current, maximum):
         """Update the gauge progress"""
@@ -1510,7 +1503,7 @@ class NetworkGraphWidget(QWidget):
         self.animation_progress = 0
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
-        self.animation_timer.start(50)  # 20 FPS animation
+        # Timer starts on demand when graph has nodes, not at startup
         
         # Mycelial node settings
         self.hyphae_count = 5  # Number of hyphae per node
@@ -3137,6 +3130,35 @@ class ConversationPane(QWidget):
         self.image_gen_checkbox.toggled.connect(self._on_image_gen_toggled)
         entry_layout.addWidget(self.image_gen_checkbox)
 
+        # Iterations spinner
+        iterations_row = QHBoxLayout()
+        iterations_label = QLabel("Iterations:")
+        iterations_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px;")
+        iterations_row.addWidget(iterations_label)
+
+        self.iterations_spinner = QSpinBox()
+        self.iterations_spinner.setRange(1, 20)
+        self.iterations_spinner.setValue(1)
+        self.iterations_spinner.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: #FFFFFF;
+                color: {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 13px;
+                min-width: 60px;
+                max-width: 80px;
+            }}
+            QSpinBox:focus {{
+                border: 1px solid {COMIC_COLORS['teal']};
+            }}
+        """)
+        self.iterations_spinner.valueChanged.connect(self._on_iterations_changed)
+        iterations_row.addWidget(self.iterations_spinner)
+        iterations_row.addStretch()
+        entry_layout.addLayout(iterations_row)
+
         layout.addWidget(self.entry_panel)
 
         # ====================================================================
@@ -3147,7 +3169,7 @@ class ConversationPane(QWidget):
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
 
         # Set font for the container (cascades to message widgets)
-        font = QFont("SF Pro Text", 13)
+        font = QFont(".AppleSystemUIFont", 13)
         self.conversation_display.container.setFont(font)
 
         layout.addWidget(self.conversation_display, 1)  # Gets most space
@@ -3201,7 +3223,6 @@ class ConversationPane(QWidget):
         # So existing code that references self.input_field still works
         # ====================================================================
         self.input_field = self.starting_prompt_widget.text_field
-        self.input_token_counter = self.starting_prompt_widget.token_counter
     
     def connect_signals(self):
         """Connect signals and slots"""
@@ -3233,6 +3254,12 @@ class ConversationPane(QWidget):
         main_window = self.window()
         if hasattr(main_window, 'auto_image'):
             main_window.auto_image = checked
+
+    def _on_iterations_changed(self, value):
+        """Update app when iterations spinner value changes"""
+        main_window = self.window()
+        if hasattr(main_window, 'max_iterations'):
+            main_window.max_iterations = value
 
     def _on_scenario_changed(self, scenario_name):
         """Update app when scenario is changed.
@@ -3295,15 +3322,6 @@ class ConversationPane(QWidget):
         self.upload_image_button.setText("📎 IMAGE")
         self.starting_prompt_widget.setFocus()
 
-    def update_input_token_counter(self):
-        """Update the token counter based on input field text length.
-        Note: Token counter is now handled internally by StartingPromptWidget,
-        but this method is kept for any external callers.
-        """
-        text = self.starting_prompt_widget.get_prompt_text()
-        token_estimate = len(text) // 4 if text else 0
-        self.input_token_counter.setText(f"~{token_estimate} tokens")
-    
     def handle_upload_image(self):
         """Handle image upload button click"""
         # Open file dialog
@@ -4496,28 +4514,17 @@ class ConversationPane(QWidget):
 
 
 class CentralContainer(QWidget):
-    """Central container widget with animated background and overlay support"""
-    
+    """Central container widget with static background and overlay support"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        
-        # Background animation state
-        self.bg_offset = 0
-        self.noise_offset = 0
-        
-        # Animation timer for background
-        self.bg_timer = QTimer(self)
-        self.bg_timer.timeout.connect(self._animate_bg)
-        self.bg_timer.start(80)  # ~12 FPS for subtle movement
-        
+
+        # Static background — no animation timer needed
+        self.setStyleSheet(f"background-color: {COLORS['bg_medium']};")
+
         # Create scanline overlay as child widget
         self.scanline_overlay = ScanlineOverlayWidget(self)
         self.scanline_overlay.hide()
-    
-    def _animate_bg(self):
-        self.bg_offset = (self.bg_offset + 1) % 360
-        self.noise_offset = (self.noise_offset + 0.5) % 100
-        self.update()
     
     def set_scanlines_enabled(self, enabled):
         """Toggle scanline effect"""
@@ -4536,57 +4543,6 @@ class CentralContainer(QWidget):
         super().resizeEvent(event)
         self.scanline_overlay.setGeometry(self.rect())
     
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # ═══ ANIMATED BACKGROUND ═══
-        # Create shifting gradient with more visible movement
-        center_x = self.width() / 2 + math.sin(math.radians(self.bg_offset)) * 100
-        center_y = self.height() / 2 + math.cos(math.radians(self.bg_offset * 0.7)) * 60
-        
-        gradient = QRadialGradient(center_x, center_y, max(self.width(), self.height()) * 0.9)
-        
-        # More visible atmospheric colors with cyan tint
-        pulse = 0.5 + 0.5 * math.sin(math.radians(self.bg_offset * 2))
-        center_r = int(10 + 8 * pulse)
-        center_g = int(15 + 10 * pulse)
-        center_b = int(30 + 15 * pulse)
-        
-        gradient.setColorAt(0, QColor(center_r, center_g, center_b))
-        gradient.setColorAt(0.4, QColor(10, 14, 26))
-        gradient.setColorAt(1, QColor(6, 8, 14))
-        
-        painter.fillRect(self.rect(), gradient)
-        
-        # Add subtle glow lines at edges
-        glow_alpha = int(15 + 10 * pulse)
-        glow_color = QColor(6, 182, 212, glow_alpha)  # Cyan glow
-        painter.setPen(QPen(glow_color, 2))
-        
-        # Top edge glow
-        painter.drawLine(0, 0, self.width(), 0)
-        # Bottom edge glow  
-        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
-        # Left edge glow
-        painter.drawLine(0, 0, 0, self.height())
-        # Right edge glow
-        painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
-        
-        # Add subtle noise/grain pattern
-        noise_color = QColor(COLORS['accent_cyan'])
-        noise_color.setAlpha(8)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(noise_color)
-        
-        # Sparse random dots for grain effect
-        random.seed(int(self.noise_offset))
-        for _ in range(50):
-            x = random.randint(0, self.width())
-            y = random.randint(0, self.height())
-            painter.drawEllipse(x, y, 1, 1)
-
-
 class ScanlineOverlayWidget(QWidget):
     """Transparent overlay widget for CRT scanline effect"""
     
@@ -4646,7 +4602,7 @@ class LiminalBackroomsApp(QMainWindow):
         
         # Settings state (moved from ControlPanel to app instance variables)
         self.conversation_mode = "AI-AI"
-        self.max_iterations = 4
+        self.max_iterations = 1
         self.current_scenario = list(SYSTEM_PROMPT_PAIRS.keys())[0] if SYSTEM_PROMPT_PAIRS else ""
 
         # Get num_ais and models from the default scenario

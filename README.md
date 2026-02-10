@@ -59,16 +59,17 @@ All the original Liminal Backrooms features, plus easier scenario management:
 
 ## Included Scenarios
 
-Fresh scenario prompts written by Claude Opus 4.5:
-- WhatsApp group chat energy
-- Anthropic Slack #random
-- Museum of Cursed Objects
-- Conspiracy Theory chat
-- Dystopian Ad Agency
-- Dark fantasy D&D campaigns
-- And the original Backrooms exploration
+8 core scenarios ship with Inference Lounge:
+- **Anthropic Slack** - Recreate the vibe of Anthropic's internal Slack #random channel
+- **Backrooms Classic (Agentic)** - The original: AIs exploring infinite liminal backrooms
+- **Conspiracy GC** - Group chat conspiracy theorists connecting the dots
+- **Dystopian Ad Agency** - Cursed Black Mirror ads for real brands
+- **Group Chat** - Chaotic WhatsApp groupchat energy with shitposts and memes
+- **Muse/Artist(s)** - Creative collaboration between artists and their muses
+- **Museum of Cursed Objects** - Each AI is a different cursed artifact in a museum
+- **Video Collaboration (AI-1 to Sora)** - Film direction prompts for AI video generation
 
-**Plus**: Now you can create your own scenarios without editing Python code!
+**Plus**: Create your own scenarios using the scenario editor, or add them to a gitignored `scenarios_personal.py` file for scenarios you don't want to commit to version control.
 
 ## How It Works
 
