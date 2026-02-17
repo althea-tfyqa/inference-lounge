@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBox
 
 from config import (
     AI_MODELS,
+    IMAGE_MODELS,
     SYSTEM_PROMPT_PAIRS,
     STARTING_PROMPTS,
     SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
@@ -3130,6 +3131,49 @@ class ConversationPane(QWidget):
         self.image_gen_checkbox.toggled.connect(self._on_image_gen_toggled)
         entry_layout.addWidget(self.image_gen_checkbox)
 
+        # Artist style field (shown when image gen is enabled)
+        artist_row = QHBoxLayout()
+        artist_label = QLabel("Artist Style:")
+        artist_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px;")
+        artist_row.addWidget(artist_label)
+
+        self.artist_style_field = QLineEdit()
+        self.artist_style_field.setPlaceholderText("e.g., Moebius, Hiroshi Yoshida, Cy Twombly...")
+        self.artist_style_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: #FFFFFF;
+                color: {COMIC_COLORS['black']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {COMIC_COLORS['teal']};
+            }}
+        """)
+        artist_row.addWidget(self.artist_style_field, 1)
+        self.artist_style_row_widget = QWidget()
+        self.artist_style_row_widget.setLayout(artist_row)
+        self.artist_style_row_widget.setVisible(False)  # Hidden by default
+        entry_layout.addWidget(self.artist_style_row_widget)
+
+        # Image model selector (shown when image gen is enabled)
+        model_row = QHBoxLayout()
+        model_label = QLabel("Image Model:")
+        model_label.setStyleSheet(f"color: {COMIC_COLORS['navy']}; font-size: 13px; font-weight: bold; min-width: 110px;")
+        model_row.addWidget(model_label)
+
+        self.image_model_selector = NoScrollComboBox()
+        self.image_model_selector.addItems(IMAGE_MODELS.keys())
+        self.image_model_selector.setCurrentIndex(0)  # Default to first model (Nano Banana Pro)
+        self.image_model_selector.setStyleSheet(get_comic_combobox_style())
+        model_row.addWidget(self.image_model_selector, 1)
+        self.image_model_row_widget = QWidget()
+        self.image_model_row_widget.setLayout(model_row)
+        self.image_model_row_widget.setVisible(False)  # Hidden by default
+        entry_layout.addWidget(self.image_model_row_widget)
+
         # Iterations spinner
         iterations_row = QHBoxLayout()
         iterations_label = QLabel("Iterations:")
@@ -3248,18 +3292,48 @@ class ConversationPane(QWidget):
             if self.scenario_selector.currentText():
                 self._on_scenario_changed(self.scenario_selector.currentText())
 
+        # Image generation controls
+        if hasattr(self, 'artist_style_field'):
+            self.artist_style_field.textChanged.connect(self._on_artist_style_changed)
+        if hasattr(self, 'image_model_selector'):
+            self.image_model_selector.currentTextChanged.connect(self._on_image_model_changed)
+
 
     def _on_image_gen_toggled(self, checked):
         """Update app when image generation toggle is changed"""
+        # Show/hide artist style and model selector
+        self.artist_style_row_widget.setVisible(checked)
+        self.image_model_row_widget.setVisible(checked)
+
+        # Update main window settings
         main_window = self.window()
         if hasattr(main_window, 'auto_image'):
             main_window.auto_image = checked
+
+        # Store artist style and model in main window
+        if hasattr(main_window, 'image_artist_style'):
+            main_window.image_artist_style = self.artist_style_field.text()
+        if hasattr(main_window, 'image_model'):
+            selected_display_name = self.image_model_selector.currentText()
+            main_window.image_model = IMAGE_MODELS.get(selected_display_name, IMAGE_MODELS[list(IMAGE_MODELS.keys())[0]])
 
     def _on_iterations_changed(self, value):
         """Update app when iterations spinner value changes"""
         main_window = self.window()
         if hasattr(main_window, 'max_iterations'):
             main_window.max_iterations = value
+
+    def _on_artist_style_changed(self, text):
+        """Update app when artist style field text changes"""
+        main_window = self.window()
+        if hasattr(main_window, 'image_artist_style'):
+            main_window.image_artist_style = text
+
+    def _on_image_model_changed(self, display_name):
+        """Update app when image model selector changes"""
+        main_window = self.window()
+        if hasattr(main_window, 'image_model'):
+            main_window.image_model = IMAGE_MODELS.get(display_name, IMAGE_MODELS[list(IMAGE_MODELS.keys())[0]])
 
     def _on_scenario_changed(self, scenario_name):
         """Update app when scenario is changed.
@@ -4618,6 +4692,8 @@ class LiminalBackroomsApp(QMainWindow):
 
         self.invite_tier = "Free"
         self.auto_image = False
+        self.image_artist_style = ""  # Artist style for image generation
+        self.image_model = IMAGE_MODELS[list(IMAGE_MODELS.keys())[0]]  # Default to first image model
         self.allow_duplicate_models = False
 
         # Main app state

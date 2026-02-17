@@ -46,6 +46,7 @@ from shared_utils import (
 )
 from gui import LiminalBackroomsApp, load_fonts, MessageWidget
 from command_parser import parse_commands, AgentCommand, format_command_result
+from sound_effects import play_completion_sound
 
 # Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
 if DEVELOPER_TOOLS:
@@ -1414,6 +1415,8 @@ class ConversationManager:
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
+                # Play random video game sound to get user's attention
+                play_completion_sound()
                 # Auto-backup the session
                 print(f"BRANCH: Auto-backing up session after round completion...")
                 self.app.left_pane.auto_backup_session()
@@ -1436,6 +1439,8 @@ class ConversationManager:
                 # Set signal indicator to idle
                 if hasattr(self.app, 'set_signal_active'):
                     self.app.set_signal_active(False)
+                # Play random video game sound to get user's attention
+                play_completion_sound()
                 # Auto-backup the session
                 print(f"MAIN: Auto-backing up session after round completion...")
                 self.app.left_pane.auto_backup_session()
@@ -2042,10 +2047,15 @@ class ConversationManager:
         prompt = text[:max_length].strip()
         
         # Add artistic direction to the prompt using the user's requested format
-        enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image using the following ai text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
-        
-        # Generate the image
-        result = generate_image_from_text(enhanced_prompt)
+        artist_style = self.app.image_artist_style
+        if artist_style:
+            enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image in the style of {artist_style}, using the following AI text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form as {artist_style} would. {prompt}"
+        else:
+            enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image using the following ai text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
+
+        # Generate the image using the selected model
+        image_model = self.app.image_model
+        result = generate_image_from_text(enhanced_prompt, model=image_model)
         
         if result["success"]:
             # Display the image in the UI
@@ -2154,10 +2164,15 @@ class ConversationManager:
         def _run_image_job():
             try:
                 # Add artistic context to the prompt
-                enhanced_prompt = f"Create an image inspired by the following description from an AI conversation: {prompt}"
-                
+                artist_style = self.app.image_artist_style
+                if artist_style:
+                    enhanced_prompt = f"Create an image in the style of {artist_style}, inspired by the following description from an AI conversation: {prompt}"
+                else:
+                    enhanced_prompt = f"Create an image inspired by the following description from an AI conversation: {prompt}"
+
                 print(f"[Agent] Starting image generation...")
-                result = generate_image_from_text(enhanced_prompt)
+                image_model = self.app.image_model
+                result = generate_image_from_text(enhanced_prompt, model=image_model)
                 
                 if result.get('success'):
                     image_path = result['image_path']

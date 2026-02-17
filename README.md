@@ -6,6 +6,18 @@ A Python-based application that enables dynamic conversations between multiple A
 
 ## What's New in Inference Lounge
 
+### 🖼️ Enhanced Image Generation Controls (February 2026)
+Fine-tune AI-generated images with new customization options:
+
+**New Controls**:
+- **Artist Style Field**: Specify an artist or style to drive the aesthetic (e.g., "Moebius", "Edward Hopper", "Cy Twombly")
+- **Image Model Selector**: Choose from 3 image generation models via OpenRouter:
+  - **Nano Banana Pro (Google Gemini 3)** - Premium quality, higher cost
+  - **FLUX 2 Flex (Black Forest Labs)** - Balanced quality and cost
+  - **Riverflow Fast (Sourceful)** - Affordable, fast generation
+- Both controls appear dynamically when "Enable AI image generation" is checked
+- Artist style gets injected into generation prompts automatically
+
 ### 🎨 Comic Book Theme (February 2026)
 Complete visual overhaul inspired by 1950s comic book aesthetics:
 
@@ -171,6 +183,8 @@ poetry run python main.py
    - **Scenario Selection**: Pick from predefined conversation scenarios
    - **Edit Scenarios** 🆕: Click to create/edit scenarios via GUI
    - **Image Generation Toggle** 🆕: Enable/disable AI image generation (defaults to OFF)
+   - **Artist Style Field** 🆕: Specify artist/style for image generation (appears when image gen enabled)
+   - **Image Model Selector** 🆕: Choose between 3 image models (appears when image gen enabled)
    - **Starting Prompt Field** 🆕: Free-form text entry to seed the conversation (optional)
    - **CONVERSE Button** 🆕: Start the conversation (entry panel collapses automatically)
    - **Portrait Column** 🆕: Left sidebar shows character portraits with active speaker highlighting
